@@ -19,3 +19,14 @@ export async function fetchTranscriptById(id) {
 
   return payload;
 }
+
+export async function deleteTranscriptById(id) {
+  const response = await fetch(`/api/transcripts/${id}`, { method: 'DELETE' });
+  const payload = await response.json();
+
+  if (!response.ok) {
+    throw new Error(payload.error || 'Unable to delete transcript.');
+  }
+
+  return payload;
+}

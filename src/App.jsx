@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { fetchTranscript } from './api/transcript';
-import { fetchTranscriptById, fetchTranscriptLibrary } from './api/transcripts';
+import { deleteTranscriptById, fetchTranscriptById, fetchTranscriptLibrary } from './api/transcripts';
 import ArchiveSearch from './components/ArchiveSearch';
 import TranscriptDetailViewer from './components/TranscriptDetailViewer';
 import TranscriptLibraryList from './components/TranscriptLibraryList';
@@ -19,6 +19,7 @@ function App() {
   const [selectedTranscript, setSelectedTranscript] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   async function loadLibrary(preferredSelectionId = '') {
     setLibraryLoading(true);
@@ -107,6 +108,25 @@ function App() {
     }
   }
 
+  async function handleDeleteTranscript(id) {
+    setDeleteLoading(true);
+    setDetailError('');
+
+    try {
+      await deleteTranscriptById(id);
+      setLibrary((current) => current.filter((item) => item.id !== id));
+
+      if (selectedTranscriptId === id) {
+        setSelectedTranscriptId('');
+        setSelectedTranscript(null);
+      }
+    } catch (deleteError) {
+      setDetailError(deleteError.message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  }
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 bg-background px-3 py-4">
       <header className="space-y-1">
@@ -130,7 +150,13 @@ function App() {
 
         <section className="space-y-2 rounded-md border border-border bg-surface p-3">
           <h2 className="text-h3 text-text">Full transcript</h2>
-          <TranscriptDetailViewer transcript={selectedTranscript} loading={detailLoading} error={detailError} />
+          <TranscriptDetailViewer
+            transcript={selectedTranscript}
+            loading={detailLoading}
+            error={detailError}
+            onDelete={handleDeleteTranscript}
+            deleting={deleteLoading}
+          />
         </section>
       </section>
 

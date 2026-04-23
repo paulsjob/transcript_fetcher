@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { fetchAndStoreTranscript } from '../services/transcriptService.js';
-import { getTranscriptById, listTranscripts, searchTranscripts } from '../repositories/transcriptRepository.js';
+import {
+  deleteTranscriptById,
+  getTranscriptById,
+  listTranscripts,
+  searchTranscripts
+} from '../repositories/transcriptRepository.js';
 import { isValidVimeoUrl } from '../utils/validate.js';
 
 const router = Router();
@@ -77,6 +82,20 @@ router.get('/transcripts/:id', async (req, res) => {
     return res.json(record);
   } catch (error) {
     return res.status(500).json({ error: 'Failed to load transcript.' });
+  }
+});
+
+router.delete('/transcripts/:id', async (req, res) => {
+  try {
+    const deleted = await deleteTranscriptById(req.params.id);
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Transcript not found.' });
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete transcript.' });
   }
 });
 
