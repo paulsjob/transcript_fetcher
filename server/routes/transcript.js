@@ -1,11 +1,7 @@
 import { Router } from 'express';
 import { fetchAndStoreTranscript } from '../services/transcriptService.js';
-import {
-  deleteTranscriptById,
-  getTranscriptById,
-  listTranscripts,
-  searchTranscripts
-} from '../repositories/transcriptRepository.js';
+import { deleteTranscriptById, getTranscriptById } from '../repositories/transcriptRepository.js';
+import { queryArchive } from '../repositories/archiveQueryRepository.js';
 import { isValidVimeoUrl } from '../utils/validate.js';
 
 const router = Router();
@@ -36,67 +32,18 @@ function buildSnippet(text, query, radius = 90) {
   return `${prefix}${snippet}${suffix}`;
 }
 
-function safeParseTranscriptEntries(transcriptJson) {
-  if (Array.isArray(transcriptJson)) {
-    return transcriptJson;
-  }
 
-  if (typeof transcriptJson !== 'string') {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(transcriptJson);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function extractMatchText(text, query) {
-  if (!text || !query) {
-    return query || '';
-  }
-
-  const normalizedText = text.toLowerCase();
-  const normalizedQuery = query.toLowerCase();
-  const index = normalizedText.indexOf(normalizedQuery);
-
-  if (index === -1) {
-    return query;
-  }
-
-  return text.slice(index, index + query.length);
-}
-
-function deriveMatchMetadata(record, query) {
-  const entries = safeParseTranscriptEntries(record.transcriptJson);
-  const normalizedQuery = query.toLowerCase();
-
-  for (let index = 0; index < entries.length; index += 1) {
-    const lineText = typeof entries[index]?.text === 'string' ? entries[index].text : '';
-    if (!lineText.toLowerCase().includes(normalizedQuery)) {
-      continue;
-    }
-
-    return {
-      snippet: buildSnippet(lineText, query),
-      matchText: extractMatchText(lineText, query),
-      bestLineIndex: index,
-      bestTimestamp: entries[index]?.timestamp || null,
-      matchSource: 'transcriptJson'
-    };
-  }
-
-  const fallbackSnippet = buildSnippet(record.transcriptText || record.title || '', query);
-  const fallbackText = extractMatchText(record.transcriptText || record.title || '', query);
-
+function parseArchiveFilters(req) {
   return {
-    snippet: fallbackSnippet,
-    matchText: fallbackText,
-    bestLineIndex: null,
-    bestTimestamp: null,
-    matchSource: entries.length ? 'transcriptJson-unmatched' : 'transcriptText'
+    q: typeof req.query.q === 'string' ? req.query.q.trim() : '',
+    tag: typeof req.query.tag === 'string' ? req.query.tag.trim() : '',
+    entity: typeof req.query.entity === 'string' ? req.query.entity.trim() : '',
+    analysisStatus: typeof req.query.analysisStatus === 'string' ? req.query.analysisStatus.trim() : '',
+    ingestStatus: typeof req.query.ingestStatus === 'string' ? req.query.ingestStatus.trim() : '',
+    durationBucket: typeof req.query.durationBucket === 'string' ? req.query.durationBucket.trim() : 'any',
+    hasQuotes: typeof req.query.hasQuotes === 'string' ? req.query.hasQuotes.trim() : '',
+    sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy.trim() : 'fetchedAt',
+    sortOrder: req.query.sortOrder === 'asc' ? 'asc' : 'desc'
   };
 }
 
@@ -118,60 +65,69 @@ function logRouteError(route, error, extras = {}) {
 }
 
 router.get('/search', async (req, res) => {
-  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const filters = parseArchiveFilters(req);
 
-  if (!q) {
+  if (!filters.q) {
     return res.json([]);
   }
 
   try {
-    const records = await searchTranscripts(q);
-    const payload = records.map((record) => {
-      const metadata = deriveMatchMetadata(record, q);
-
-      return {
-        id: record.id,
-        videoId: record.videoId,
-        title: record.title,
-        snippet: metadata.snippet,
-        synopsis: record.synopsis || '',
-        entities: record.entities || {},
-        tags: record.tags || [],
-        matchQuery: q,
-        matchText: metadata.matchText,
-        bestLineIndex: metadata.bestLineIndex,
-        bestTimestamp: metadata.bestTimestamp,
-        matchSource: metadata.matchSource
-      };
-    });
-
-    return res.json(payload);
-  } catch (error) {
-    logRouteError('/api/search', error, { query: q });
-    return res.status(500).json({ error: 'Failed to search transcripts.' });
-  }
-});
-
-router.get('/transcripts', async (_req, res) => {
-  try {
-    const records = await listTranscripts();
+    const records = await queryArchive(filters);
     const payload = records.map((record) => ({
       id: record.id,
       videoId: record.videoId,
       title: record.title,
       fetchedAt: record.fetchedAt,
       durationSeconds: record.durationSeconds,
+      ingestStatus: record.ingestStatus,
+      analysisStatus: record.analysisStatus || null,
+      synopsis: record.synopsis || '',
+      tags: record.tags || [],
+      entities: record.entities || {},
+      snippet: buildSnippet(record.transcriptText || record.synopsis || record.title, filters.q),
+      matchQuery: filters.q,
+      matchedFields: record.match.matchedFields,
+      matchingTag: record.match.matchingTag,
+      matchingEntity: record.match.matchingEntity,
+      matchingQuoteSnippet: record.match.matchingQuoteSnippet
+    }));
+
+    return res.json(payload);
+  } catch (error) {
+    logRouteError('/api/search', error, { query: filters.q });
+    return res.status(500).json({ error: 'Failed to search transcripts.' });
+  }
+});
+
+router.get('/transcripts', async (req, res) => {
+  const filters = parseArchiveFilters(req);
+
+  try {
+    const records = await queryArchive(filters);
+    const payload = records.map((record) => ({
+      id: record.id,
+      videoId: record.videoId,
+      title: record.title,
+      fetchedAt: record.fetchedAt,
+      durationSeconds: record.durationSeconds,
+      ingestStatus: record.ingestStatus,
+      ingestError: record.ingestError,
       analysisStatus: record.analysisStatus || null,
       synopsis: record.synopsis || '',
       entities: record.entities || {},
       tags: record.tags || [],
       keyPoints: record.keyPoints || [],
-      preview: buildSnippet(record.transcriptText, '', 70)
+      notableQuotes: record.notableQuotes || [],
+      preview: buildSnippet(record.transcriptText, filters.q, 70),
+      matchedFields: record.match.matchedFields,
+      matchingTag: record.match.matchingTag,
+      matchingEntity: record.match.matchingEntity,
+      matchingQuoteSnippet: record.match.matchingQuoteSnippet
     }));
 
     return res.json(payload);
   } catch (error) {
-    logRouteError('/api/transcripts', error);
+    logRouteError('/api/transcripts', error, { filters });
     return res.status(500).json({ error: 'Failed to load transcript library.' });
   }
 });

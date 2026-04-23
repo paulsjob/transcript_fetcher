@@ -152,19 +152,24 @@ function findInitialMatchIndex(matchLineIndices, searchFocus) {
   return 0;
 }
 
-function renderEntityBlock(label, items = []) {
+function renderEntityBlock(label, items = [], onEntityClick) {
   if (!items.length) {
     return null;
   }
 
   return (
     <p className="text-small text-textMuted">
-      <span className="font-semibold text-text">{label}:</span> {items.join(', ')}
+      <span className="font-semibold text-text">{label}:</span>{' '}
+      {items.map((item, index) => (
+        <button key={`${label}-${item}-${index}`} type="button" onClick={() => onEntityClick?.(item)} className="mr-1 rounded border border-border px-1 py-0.5 text-xs text-text hover:border-focus">
+          {item}
+        </button>
+      ))}
     </p>
   );
 }
 
-export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting, searchFocus }) {
+export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting, searchFocus = null, onApplyArchiveFilter }) {
   const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
   const matchRefs = useRef({});
 
@@ -314,18 +319,18 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
         {transcript.entities ? (
           <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
             <h4 className="text-body font-semibold text-text">Entities</h4>
-            {renderEntityBlock('People', transcript.entities.people)}
-            {renderEntityBlock('Organizations', transcript.entities.organizations)}
-            {renderEntityBlock('Places', transcript.entities.places)}
-            {renderEntityBlock('Programs', transcript.entities.programs)}
-            {renderEntityBlock('Issues', transcript.entities.issues)}
+            {renderEntityBlock('People', transcript.entities.people, (value) => onApplyArchiveFilter?.({ entity: value }))}
+            {renderEntityBlock('Organizations', transcript.entities.organizations, (value) => onApplyArchiveFilter?.({ entity: value }))}
+            {renderEntityBlock('Places', transcript.entities.places, (value) => onApplyArchiveFilter?.({ entity: value }))}
+            {renderEntityBlock('Programs', transcript.entities.programs, (value) => onApplyArchiveFilter?.({ entity: value }))}
+            {renderEntityBlock('Issues', transcript.entities.issues, (value) => onApplyArchiveFilter?.({ entity: value }))}
           </section>
         ) : null}
 
         {transcript.tags?.length ? (
           <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
             <h4 className="text-body font-semibold text-text">Editorial tags</h4>
-            <p className="text-small text-textMuted">{transcript.tags.join(', ')}</p>
+            <div className="flex flex-wrap gap-1">{transcript.tags.map((tag, index) => (<button key={`${tag}-${index}`} type="button" onClick={() => onApplyArchiveFilter?.({ tag })} className="rounded border border-border px-1.5 py-0.5 text-xs text-text hover:border-focus">{tag}</button>))}</div>
           </section>
         ) : null}
 
