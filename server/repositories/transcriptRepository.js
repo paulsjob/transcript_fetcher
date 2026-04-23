@@ -30,7 +30,8 @@ export async function searchTranscripts(query) {
       id: true,
       videoId: true,
       title: true,
-      transcriptText: true
+      transcriptText: true,
+      transcriptJson: true
     },
     orderBy: {
       fetchedAt: 'desc'

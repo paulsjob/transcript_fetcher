@@ -20,6 +20,7 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [searchFocus, setSearchFocus] = useState(null);
 
   async function loadLibrary(preferredSelectionId = '') {
     setLibraryLoading(true);
@@ -127,6 +128,20 @@ function App() {
     }
   }
 
+  function handleArchiveResultSelect(result, query) {
+    if (!result?.id) {
+      return;
+    }
+
+    setSelectedTranscriptId(result.id);
+    setSearchFocus({
+      query: result.matchQuery || query || '',
+      matchText: result.matchText || '',
+      bestLineIndex: Number.isInteger(result.bestLineIndex) ? result.bestLineIndex : null,
+      bestTimestamp: result.bestTimestamp || null
+    });
+  }
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 bg-background px-3 py-4">
       <header className="space-y-1">
@@ -134,7 +149,7 @@ function App() {
         <p className="text-body text-textMuted">Search your local archive instantly, or fetch new Vimeo transcripts.</p>
       </header>
 
-      <ArchiveSearch onSelectResult={setSelectedTranscriptId} />
+      <ArchiveSearch onSelectResult={handleArchiveResultSelect} />
 
       <section className="grid gap-3 lg:grid-cols-[360px_1fr]">
         <section className="space-y-2 rounded-md border border-border bg-surface p-3">
@@ -144,7 +159,10 @@ function App() {
             selectedId={selectedTranscriptId}
             loading={libraryLoading}
             error={libraryError}
-            onSelect={setSelectedTranscriptId}
+            onSelect={(id) => {
+              setSelectedTranscriptId(id);
+              setSearchFocus(null);
+            }}
           />
         </section>
 
@@ -156,6 +174,7 @@ function App() {
             error={detailError}
             onDelete={handleDeleteTranscript}
             deleting={deleteLoading}
+            searchFocus={searchFocus}
           />
         </section>
       </section>
