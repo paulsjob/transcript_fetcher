@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { fetchAndStoreTranscript } from '../services/transcriptService.js';
-import { searchTranscripts } from '../repositories/transcriptRepository.js';
+import { getTranscriptById, listTranscripts, searchTranscripts } from '../repositories/transcriptRepository.js';
 import { isValidVimeoUrl } from '../utils/validate.js';
 
 const router = Router();
@@ -46,6 +46,37 @@ router.get('/search', async (req, res) => {
     return res.json(payload);
   } catch (error) {
     return res.status(500).json({ error: 'Failed to search transcripts.' });
+  }
+});
+
+router.get('/transcripts', async (_req, res) => {
+  try {
+    const records = await listTranscripts();
+    const payload = records.map((record) => ({
+      id: record.id,
+      videoId: record.videoId,
+      title: record.title,
+      fetchedAt: record.fetchedAt,
+      preview: buildSnippet(record.transcriptText, '', 70)
+    }));
+
+    return res.json(payload);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to load transcript library.' });
+  }
+});
+
+router.get('/transcripts/:id', async (req, res) => {
+  try {
+    const record = await getTranscriptById(req.params.id);
+
+    if (!record) {
+      return res.status(404).json({ error: 'Transcript not found.' });
+    }
+
+    return res.json(record);
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to load transcript.' });
   }
 });
 
