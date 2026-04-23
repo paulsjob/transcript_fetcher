@@ -84,6 +84,23 @@ export async function findAllVideoIds() {
   return rows.map((row) => row.videoId);
 }
 
+export async function findExistingVideoIds(videoIds) {
+  if (!Array.isArray(videoIds) || !videoIds.length) {
+    return [];
+  }
+
+  const rows = await prisma.transcript.findMany({
+    where: {
+      videoId: {
+        in: videoIds
+      }
+    },
+    select: { videoId: true }
+  });
+
+  return rows.map((row) => row.videoId);
+}
+
 export async function hasTranscriptByVideoId(videoId) {
   const transcript = await prisma.transcript.findUnique({
     where: { videoId },
