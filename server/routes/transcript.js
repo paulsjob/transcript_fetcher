@@ -32,17 +32,10 @@ function buildSnippet(text, query, radius = 90) {
   return `${prefix}${snippet}${suffix}`;
 }
 
-
 function parseArchiveFilters(req) {
   return {
     q: typeof req.query.q === 'string' ? req.query.q.trim() : '',
-    tag: typeof req.query.tag === 'string' ? req.query.tag.trim() : '',
-    entity: typeof req.query.entity === 'string' ? req.query.entity.trim() : '',
-    analysisStatus: typeof req.query.analysisStatus === 'string' ? req.query.analysisStatus.trim() : '',
-    ingestStatus: typeof req.query.ingestStatus === 'string' ? req.query.ingestStatus.trim() : '',
-    durationBucket: typeof req.query.durationBucket === 'string' ? req.query.durationBucket.trim() : 'any',
-    hasQuotes: typeof req.query.hasQuotes === 'string' ? req.query.hasQuotes.trim() : '',
-    sortBy: typeof req.query.sortBy === 'string' ? req.query.sortBy.trim() : 'fetchedAt',
+    sortBy: req.query.sortBy === 'title' ? 'title' : 'fetchedAt',
     sortOrder: req.query.sortOrder === 'asc' ? 'asc' : 'desc'
   };
 }
@@ -82,14 +75,9 @@ router.get('/search', async (req, res) => {
       ingestStatus: record.ingestStatus,
       analysisStatus: record.analysisStatus || null,
       synopsis: record.synopsis || '',
-      tags: record.tags || [],
-      entities: record.entities || {},
       snippet: buildSnippet(record.transcriptText || record.synopsis || record.title, filters.q),
       matchQuery: filters.q,
-      matchedFields: record.match.matchedFields,
-      matchingTag: record.match.matchingTag,
-      matchingEntity: record.match.matchingEntity,
-      matchingQuoteSnippet: record.match.matchingQuoteSnippet
+      matchedFields: []
     }));
 
     return res.json(payload);
@@ -114,15 +102,8 @@ router.get('/transcripts', async (req, res) => {
       ingestError: record.ingestError,
       analysisStatus: record.analysisStatus || null,
       synopsis: record.synopsis || '',
-      entities: record.entities || {},
-      tags: record.tags || [],
       keyPoints: record.keyPoints || [],
-      notableQuotes: record.notableQuotes || [],
-      preview: buildSnippet(record.transcriptText, filters.q, 70),
-      matchedFields: record.match.matchedFields,
-      matchingTag: record.match.matchingTag,
-      matchingEntity: record.match.matchingEntity,
-      matchingQuoteSnippet: record.match.matchingQuoteSnippet
+      preview: buildSnippet(record.transcriptText, filters.q, 70)
     }));
 
     return res.json(payload);

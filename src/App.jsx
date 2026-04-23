@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchTranscript } from './api/transcript';
 import { deleteTranscriptById, fetchTranscriptById, fetchTranscriptLibrary } from './api/transcripts';
 import TranscriptDetailViewer from './components/TranscriptDetailViewer';
@@ -6,13 +6,8 @@ import TranscriptLibraryList from './components/TranscriptLibraryList';
 import TranscriptPanel from './components/TranscriptPanel';
 import UrlInputForm from './components/UrlInputForm';
 
-const DEFAULT_ARCHIVE_FILTERS = {
+const DEFAULT_LIBRARY_OPTIONS = {
   q: '',
-  tag: '',
-  entity: '',
-  analysisStatus: '',
-  ingestStatus: '',
-  durationBucket: 'any',
   sortBy: 'fetchedAt',
   sortOrder: 'desc'
 };
@@ -22,22 +17,24 @@ function App() {
   const [transcript, setTranscript] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
   const [library, setLibrary] = useState([]);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryError, setLibraryError] = useState('');
+  const [libraryOptions, setLibraryOptions] = useState(DEFAULT_LIBRARY_OPTIONS);
+
   const [selectedTranscriptId, setSelectedTranscriptId] = useState('');
   const [selectedTranscript, setSelectedTranscript] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [archiveFilters, setArchiveFilters] = useState(DEFAULT_ARCHIVE_FILTERS);
 
-  async function loadLibrary(preferredSelectionId = '', filters = archiveFilters) {
+  async function loadLibrary(preferredSelectionId = '', options = libraryOptions) {
     setLibraryLoading(true);
     setLibraryError('');
 
     try {
-      const data = await fetchTranscriptLibrary(filters);
+      const data = await fetchTranscriptLibrary(options);
       setLibrary(data);
 
       const selectedId = preferredSelectionId || selectedTranscriptId;
@@ -47,11 +44,7 @@ function App() {
         return;
       }
 
-      if (data.length) {
-        setSelectedTranscriptId(data[0].id);
-      } else {
-        setSelectedTranscriptId('');
-      }
+      setSelectedTranscriptId(data[0]?.id || '');
     } catch (loadError) {
       setLibraryError(loadError.message);
     } finally {
@@ -60,9 +53,13 @@ function App() {
   }
 
   useEffect(() => {
-    loadLibrary('', archiveFilters);
+    const timer = setTimeout(() => {
+      loadLibrary('', libraryOptions);
+    }, 250);
+
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [archiveFilters]);
+  }, [libraryOptions]);
 
   useEffect(() => {
     if (!selectedTranscriptId) {
@@ -71,7 +68,7 @@ function App() {
       return;
     }
 
-    let isCancelled = false;
+    let cancelled = false;
 
     async function loadTranscriptDetail() {
       setDetailLoading(true);
@@ -79,16 +76,16 @@ function App() {
 
       try {
         const data = await fetchTranscriptById(selectedTranscriptId);
-        if (!isCancelled) {
+        if (!cancelled) {
           setSelectedTranscript(data);
         }
       } catch (loadError) {
-        if (!isCancelled) {
+        if (!cancelled) {
           setDetailError(loadError.message);
           setSelectedTranscript(null);
         }
       } finally {
-        if (!isCancelled) {
+        if (!cancelled) {
           setDetailLoading(false);
         }
       }
@@ -97,7 +94,7 @@ function App() {
     loadTranscriptDetail();
 
     return () => {
-      isCancelled = true;
+      cancelled = true;
     };
   }, [selectedTranscriptId]);
 
@@ -138,37 +135,44 @@ function App() {
     }
   }
 
+  const librarySubtitle = useMemo(() => {
+    if (libraryLoading) {
+      return 'Loading transcript library…';
+    }
+
+    return `${library.length} transcript${library.length === 1 ? '' : 's'}`;
+  }, [library.length, libraryLoading]);
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 bg-background px-3 py-4">
       <header className="space-y-1">
         <h1 className="text-h1 text-text">Vimeo Transcript Fetcher</h1>
-        <p className="text-body text-textMuted">Explore your transcript archive by themes, entities, tags, quotes, and workflow status.</p>
+        <p className="text-body text-textMuted">Fetch, store, search, and read transcripts.</p>
       </header>
 
       <section className="grid gap-3 lg:grid-cols-[420px_1fr]">
         <section className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <h2 className="text-h3 text-text">Transcript archive</h2>
+          <h2 className="text-h3 text-text">Transcript library</h2>
+          <p className="text-small text-textMuted">{librarySubtitle}</p>
           <TranscriptLibraryList
             items={library}
             selectedId={selectedTranscriptId}
             loading={libraryLoading}
             error={libraryError}
-            filters={archiveFilters}
-            onFiltersChange={(next) => setArchiveFilters((current) => ({ ...current, ...next }))}
-            onClearFilters={() => setArchiveFilters(DEFAULT_ARCHIVE_FILTERS)}
+            filters={libraryOptions}
+            onFiltersChange={(next) => setLibraryOptions((current) => ({ ...current, ...next }))}
             onSelect={(id) => setSelectedTranscriptId(id)}
           />
         </section>
 
         <section className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <h2 className="text-h3 text-text">Full transcript</h2>
+          <h2 className="text-h3 text-text">Transcript</h2>
           <TranscriptDetailViewer
             transcript={selectedTranscript}
             loading={detailLoading}
             error={detailError}
             onDelete={handleDeleteTranscript}
             deleting={deleteLoading}
-            onApplyArchiveFilter={(partial) => setArchiveFilters((current) => ({ ...current, ...partial }))}
           />
         </section>
       </section>
