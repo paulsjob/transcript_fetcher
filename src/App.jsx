@@ -1,11 +1,21 @@
 import { useEffect, useState } from 'react';
 import { fetchTranscript } from './api/transcript';
 import { deleteTranscriptById, fetchTranscriptById, fetchTranscriptLibrary } from './api/transcripts';
-import ArchiveSearch from './components/ArchiveSearch';
 import TranscriptDetailViewer from './components/TranscriptDetailViewer';
 import TranscriptLibraryList from './components/TranscriptLibraryList';
 import TranscriptPanel from './components/TranscriptPanel';
 import UrlInputForm from './components/UrlInputForm';
+
+const DEFAULT_ARCHIVE_FILTERS = {
+  q: '',
+  tag: '',
+  entity: '',
+  analysisStatus: '',
+  ingestStatus: '',
+  durationBucket: 'any',
+  sortBy: 'fetchedAt',
+  sortOrder: 'desc'
+};
 
 function App() {
   const [url, setUrl] = useState('');
@@ -20,14 +30,14 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
-  const [searchFocus, setSearchFocus] = useState(null);
+  const [archiveFilters, setArchiveFilters] = useState(DEFAULT_ARCHIVE_FILTERS);
 
-  async function loadLibrary(preferredSelectionId = '') {
+  async function loadLibrary(preferredSelectionId = '', filters = archiveFilters) {
     setLibraryLoading(true);
     setLibraryError('');
 
     try {
-      const data = await fetchTranscriptLibrary();
+      const data = await fetchTranscriptLibrary(filters);
       setLibrary(data);
 
       const selectedId = preferredSelectionId || selectedTranscriptId;
@@ -37,9 +47,9 @@ function App() {
         return;
       }
 
-      if (!selectedTranscriptId && data.length) {
+      if (data.length) {
         setSelectedTranscriptId(data[0].id);
-      } else if (!data.length) {
+      } else {
         setSelectedTranscriptId('');
       }
     } catch (loadError) {
@@ -50,9 +60,9 @@ function App() {
   }
 
   useEffect(() => {
-    loadLibrary();
+    loadLibrary('', archiveFilters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [archiveFilters]);
 
   useEffect(() => {
     if (!selectedTranscriptId) {
@@ -115,7 +125,7 @@ function App() {
 
     try {
       await deleteTranscriptById(id);
-      setLibrary((current) => current.filter((item) => item.id !== id));
+      await loadLibrary();
 
       if (selectedTranscriptId === id) {
         setSelectedTranscriptId('');
@@ -128,41 +138,25 @@ function App() {
     }
   }
 
-  function handleArchiveResultSelect(result, query) {
-    if (!result?.id) {
-      return;
-    }
-
-    setSelectedTranscriptId(result.id);
-    setSearchFocus({
-      query: result.matchQuery || query || '',
-      matchText: result.matchText || '',
-      bestLineIndex: Number.isInteger(result.bestLineIndex) ? result.bestLineIndex : null,
-      bestTimestamp: result.bestTimestamp || null
-    });
-  }
-
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 bg-background px-3 py-4">
       <header className="space-y-1">
         <h1 className="text-h1 text-text">Vimeo Transcript Fetcher</h1>
-        <p className="text-body text-textMuted">Search your local archive instantly, or fetch new Vimeo transcripts.</p>
+        <p className="text-body text-textMuted">Explore your transcript archive by themes, entities, tags, quotes, and workflow status.</p>
       </header>
 
-      <ArchiveSearch onSelectResult={handleArchiveResultSelect} />
-
-      <section className="grid gap-3 lg:grid-cols-[360px_1fr]">
+      <section className="grid gap-3 lg:grid-cols-[420px_1fr]">
         <section className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <h2 className="text-h3 text-text">Transcript library</h2>
+          <h2 className="text-h3 text-text">Transcript archive</h2>
           <TranscriptLibraryList
             items={library}
             selectedId={selectedTranscriptId}
             loading={libraryLoading}
             error={libraryError}
-            onSelect={(id) => {
-              setSelectedTranscriptId(id);
-              setSearchFocus(null);
-            }}
+            filters={archiveFilters}
+            onFiltersChange={(next) => setArchiveFilters((current) => ({ ...current, ...next }))}
+            onClearFilters={() => setArchiveFilters(DEFAULT_ARCHIVE_FILTERS)}
+            onSelect={(id) => setSelectedTranscriptId(id)}
           />
         </section>
 
@@ -174,7 +168,7 @@ function App() {
             error={detailError}
             onDelete={handleDeleteTranscript}
             deleting={deleteLoading}
-            searchFocus={searchFocus}
+            onApplyArchiveFilter={(partial) => setArchiveFilters((current) => ({ ...current, ...partial }))}
           />
         </section>
       </section>

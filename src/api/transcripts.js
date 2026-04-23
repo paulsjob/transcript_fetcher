@@ -1,5 +1,25 @@
-export async function fetchTranscriptLibrary() {
-  const response = await fetch('/api/transcripts');
+function toQueryString(filters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value === null || value === undefined) {
+      return;
+    }
+
+    const normalized = `${value}`.trim();
+    if (!normalized || normalized === 'any') {
+      return;
+    }
+
+    params.set(key, normalized);
+  });
+
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}
+
+export async function fetchTranscriptLibrary(filters = {}) {
+  const response = await fetch(`/api/transcripts${toQueryString(filters)}`);
   const payload = await response.json();
 
   if (!response.ok) {
