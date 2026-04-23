@@ -4,116 +4,44 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import ytDlp from 'yt-dlp-exec';
 import { parseVttToTranscript } from '../utils/parseVtt.js';
-import { markNoSubtitles, upsertTranscript } from '../repositories/transcriptRepository.js';
+import { markContentNoTranscript, upsertContentItem } from '../repositories/contentRepository.js';
+import { ensureSource } from '../repositories/sourceRepository.js';
 import { analyzeTranscript } from './transcriptAnalysisService.js';
 
-const DEV_VERBOSE_ERRORS =
-  process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
+const DEV_VERBOSE_ERRORS = process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
 
-function logTranscriptEvent(event, context = {}, level = 'info') {
-  const payload = { scope: 'transcript-fetch', event, ...context };
-
-  if (level === 'error') {
-    console.error(payload);
-    return;
+function detectPlatformFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes('vimeo.com')) return 'vimeo';
+    if (host.includes('youtube.com') || host.includes('youtu.be')) return 'youtube';
+  } catch {
+    return 'unknown';
   }
 
-  console.log(payload);
-}
-
-function normalizeErrorText(error = null) {
-  return `${error?.stderr || ''}\n${error?.message || ''}`.toLowerCase();
+  return 'unknown';
 }
 
 function classifyYtDlpError(error = null) {
-  const details = normalizeErrorText(error);
-
-  if (
-    error?.code === 'ENOENT' ||
-    details.includes('spawn') ||
-    details.includes('enoent')
-  ) {
-    return {
-      type: 'missing_binary',
-      message:
-        'yt-dlp executable is unavailable. Install yt-dlp on your system or set YT_DLP_PATH to a valid binary path.'
-    };
+  const details = `${error?.stderr || ''}\n${error?.message || ''}`.toLowerCase();
+  if (error?.code === 'ENOENT' || details.includes('spawn') || details.includes('enoent')) {
+    return { type: 'missing_binary', message: 'yt-dlp executable is unavailable.' };
   }
-
-  if (
-    details.includes('private') ||
-    details.includes('password') ||
-    details.includes('login required') ||
-    details.includes('forbidden') ||
-    details.includes('http error 403')
-  ) {
-    return {
-      type: 'restricted_video',
-      message: 'Video is private or restricted; subtitles could not be accessed.'
-    };
+  if (details.includes('private') || details.includes('password') || details.includes('login required') || details.includes('forbidden') || details.includes('http error 403')) {
+    return { type: 'restricted_video', message: 'Video is private or restricted.' };
   }
-
-  if (
-    details.includes('no subtitles') ||
-    details.includes('no automatic captions') ||
-    details.includes('subtitles are not available')
-  ) {
-    return {
-      type: 'no_subtitles',
-      message: 'No subtitles were found for this video.'
-    };
+  if (details.includes('no subtitles') || details.includes('no automatic captions') || details.includes('subtitles are not available')) {
+    return { type: 'no_subtitles', message: 'No subtitles were found for this item.' };
   }
-
-  if (details.includes('unsupported url')) {
-    return { type: 'unsupported_url', message: 'Unsupported video URL.' };
-  }
-
-  return {
-    type: 'extract_failed',
-    message: 'Failed to fetch transcript with yt-dlp.'
-  };
-}
-
-function createInternalError(message, details = null) {
-  const error = new Error(message);
-  error.statusCode = 500;
-  if (details) {
-    error.details = details;
-  }
-  return error;
+  return { type: 'extract_failed', message: 'Failed to fetch transcript with yt-dlp.' };
 }
 
 function createNoTranscriptError() {
-  const error = new Error('No subtitles available for this video');
+  const error = new Error('No subtitles available for this content item');
   error.statusCode = 404;
-  error.payload = { error: 'No subtitles available for this video' };
+  error.payload = { error: 'No subtitles available for this content item' };
   return error;
-}
-
-async function getVideoMetadata(videoUrl) {
-  logTranscriptEvent('metadata.fetch.start', { videoUrl });
-
-  const jsonOutput = await runYtDlp(videoUrl, {
-    dumpSingleJson: true,
-    skipDownload: true,
-    noWarnings: true,
-    noCallHome: true
-  });
-  const parsed = typeof jsonOutput === 'string' ? JSON.parse(jsonOutput) : jsonOutput;
-
-  const metadata = {
-    id: parsed.id,
-    title: parsed.title || 'Untitled Vimeo Video',
-    durationSeconds: Number.isFinite(parsed.duration) ? Math.round(parsed.duration) : null
-  };
-
-  logTranscriptEvent('metadata.fetch.success', {
-    videoId: metadata.id,
-    title: metadata.title,
-    durationSeconds: metadata.durationSeconds
-  });
-
-  return metadata;
 }
 
 const ytDlpRunners = [
@@ -123,62 +51,61 @@ const ytDlpRunners = [
 
 async function runYtDlp(url, options) {
   let lastError = null;
-
   for (const candidate of ytDlpRunners) {
     try {
       return await candidate.runner(url, options);
     } catch (error) {
       lastError = error;
       const classification = classifyYtDlpError(error);
-      logTranscriptEvent(
-        'ytdlp.exec.failed',
-        {
-          candidate: candidate.name,
-          type: classification.type,
-          message: error?.message || '',
-          stderr: DEV_VERBOSE_ERRORS ? error?.stderr?.toString() || '' : undefined
-        },
-        'error'
-      );
-
       if (classification.type !== 'missing_binary') {
         throw error;
       }
     }
   }
-
-  throw lastError || createInternalError('Failed to run yt-dlp.');
+  throw lastError || new Error('Failed to run yt-dlp.');
 }
 
-async function extractTranscript(videoUrl, videoId) {
-  const workdir = await mkdtemp(path.join(tmpdir(), 'vimeo-transcript-'));
+async function getContentMetadata(contentUrl) {
+  const jsonOutput = await runYtDlp(contentUrl, {
+    dumpSingleJson: true,
+    skipDownload: true,
+    noWarnings: true,
+    noCallHome: true
+  });
+  const parsed = typeof jsonOutput === 'string' ? JSON.parse(jsonOutput) : jsonOutput;
+
+  const platform = detectPlatformFromUrl(contentUrl);
+
+  return {
+    id: parsed.id,
+    title: parsed.title || 'Untitled media item',
+    durationSeconds: Number.isFinite(parsed.duration) ? Math.round(parsed.duration) : null,
+    publishedAt: parsed.upload_date ? new Date(`${parsed.upload_date.slice(0, 4)}-${parsed.upload_date.slice(4, 6)}-${parsed.upload_date.slice(6, 8)}T00:00:00Z`) : null,
+    url: parsed.webpage_url || contentUrl,
+    uploaderId: parsed.uploader_id || parsed.channel_id || null,
+    uploaderName: parsed.uploader || parsed.channel || `${platform} source`,
+    metadata: parsed,
+    platform
+  };
+}
+
+async function extractTranscript(contentUrl, externalContentId) {
+  const workdir = await mkdtemp(path.join(tmpdir(), 'content-transcript-'));
   const outputTemplate = path.join(workdir, '%(id)s.%(ext)s');
 
-  const ytDlpOptions = {
-    writeAutoSubs: true,
-    writeSubs: true,
-    subLangs: 'en.*,en,all,-live_chat',
-    subFormat: 'vtt',
-    skipDownload: true,
-    noPlaylist: true,
-    output: outputTemplate
-  };
-
   try {
-    logTranscriptEvent('subtitles.fetch.start', { videoUrl, videoId, workdir });
-    await runYtDlp(videoUrl, ytDlpOptions);
-    logTranscriptEvent('subtitles.fetch.success', { videoId });
-
-    const files = readdirSync(workdir);
-    const vttFile = files.find(
-      (file) => file.startsWith(`${videoId}.`) && file.endsWith('.vtt')
-    );
-    logTranscriptEvent('subtitles.vtt.detected', {
-      videoId,
-      files,
-      vttFile: vttFile || null
+    await runYtDlp(contentUrl, {
+      writeAutoSubs: true,
+      writeSubs: true,
+      subLangs: 'en.*,en,all,-live_chat',
+      subFormat: 'vtt',
+      skipDownload: true,
+      noPlaylist: true,
+      output: outputTemplate
     });
 
+    const files = readdirSync(workdir);
+    const vttFile = files.find((file) => file.startsWith(`${externalContentId}.`) && file.endsWith('.vtt'));
     if (!vttFile) {
       throw createNoTranscriptError();
     }
@@ -188,18 +115,9 @@ async function extractTranscript(videoUrl, videoId) {
       throw createNoTranscriptError();
     }
 
-    let transcript = [];
-    try {
-      const vttContent = await readFile(vttFilePath, 'utf-8');
-      logTranscriptEvent('subtitles.vtt.parse.start', { videoId, vttFile });
-      transcript = parseVttToTranscript(vttContent);
-      logTranscriptEvent('subtitles.vtt.parse.success', {
-        videoId,
-        segments: transcript.length
-      });
-    } finally {
-      await rm(vttFilePath, { force: true });
-    }
+    const vttContent = await readFile(vttFilePath, 'utf-8');
+    const transcript = parseVttToTranscript(vttContent);
+    await rm(vttFilePath, { force: true });
 
     if (!transcript.length) {
       throw createNoTranscriptError();
@@ -211,142 +129,84 @@ async function extractTranscript(videoUrl, videoId) {
   }
 }
 
-export async function fetchAndStoreTranscript(videoUrl) {
+export async function fetchAndStoreTranscript(contentUrl, sourceOverride = null) {
   let metadata = null;
 
   try {
-    metadata = await getVideoMetadata(videoUrl);
-    const transcript = await extractTranscript(videoUrl, metadata.id);
+    metadata = await getContentMetadata(contentUrl);
+    const source = sourceOverride || (await ensureSource({
+      platform: metadata.platform,
+      handle: metadata.uploaderId || 'default',
+      displayName: metadata.uploaderName || `${metadata.platform} source`,
+      sourceUrl: contentUrl,
+      isActive: true,
+      ingestSettings: { mode: 'manual' }
+    }));
+
+    const transcript = await extractTranscript(contentUrl, metadata.id);
     const transcriptText = transcript.map((entry) => entry.text).join(' ').trim();
 
     let analysis = null;
     try {
-      analysis = await analyzeTranscript({
-        title: metadata.title,
-        durationSeconds: metadata.durationSeconds,
-        transcript,
-        transcriptText
-      });
-      logTranscriptEvent('analysis.complete', {
-        videoId: metadata.id,
-        status: analysis.analysisStatus,
-        version: analysis.analysisVersion
-      });
-    } catch (analysisError) {
-      logTranscriptEvent(
-        'analysis.failed',
-        {
-          videoId: metadata.id,
-          message: analysisError?.message || 'Unknown analysis error'
-        },
-        'error'
-      );
-      analysis = {
-        analysisStatus: 'failed',
-        analysisVersion: null,
-        analyzedAt: new Date(),
-        synopsis: null,
-        keyPoints: [],
-        entities: { people: [], organizations: [], places: [], programs: [], issues: [] },
-        tags: [],
-        sections: [],
-        notableQuotes: []
-      };
+      analysis = await analyzeTranscript({ title: metadata.title, durationSeconds: metadata.durationSeconds, transcript, transcriptText });
+    } catch {
+      analysis = { analysisStatus: 'failed', analyzedAt: new Date(), keyPoints: [], entities: {}, tags: [], sections: [], notableQuotes: [] };
     }
 
-    logTranscriptEvent('db.upsert.start', {
-      videoId: metadata.id,
+    await upsertContentItem({
+      sourceId: source.id,
+      externalContentId: metadata.id,
+      platform: metadata.platform,
+      contentType: 'video',
       title: metadata.title,
-      durationSeconds: metadata.durationSeconds,
-      segments: transcript.length,
-      analysisStatus: analysis?.analysisStatus || null
-    });
-    await upsertTranscript({
-      videoId: metadata.id,
-      title: metadata.title,
-      durationSeconds: metadata.durationSeconds,
       transcript,
-      analysis,
-      ingestStatus: 'completed',
-      ingestError: null
-    });
-    logTranscriptEvent('db.upsert.success', { videoId: metadata.id });
-
-    return {
-      videoId: metadata.id,
-      title: metadata.title,
+      transcriptText,
+      url: metadata.url,
+      publishedAt: metadata.publishedAt,
       durationSeconds: metadata.durationSeconds,
-      transcript
-    };
+      ingestStatus: 'completed',
+      ingestError: null,
+      rawMetadata: metadata.metadata,
+      analysis
+    });
+
+    return { videoId: metadata.id, title: metadata.title, durationSeconds: metadata.durationSeconds, transcript, platform: metadata.platform, sourceId: source.id };
   } catch (error) {
-    if (error?.statusCode === 404) {
-      if (metadata?.id) {
-        try {
-          await markNoSubtitles({
-            videoId: metadata.id,
-            title: metadata.title,
-            durationSeconds: metadata.durationSeconds,
-            message: error?.payload?.error || error.message
-          });
-          logTranscriptEvent('db.mark_no_subtitles.success', { videoId: metadata.id });
-        } catch (markError) {
-          logTranscriptEvent(
-            'db.mark_no_subtitles.failed',
-            {
-              videoId: metadata.id,
-              message: markError?.message || 'Failed to persist no-subtitles marker'
-            },
-            'error'
-          );
-        }
-      }
+    if (error?.statusCode === 404 && metadata) {
+      const source = sourceOverride || (await ensureSource({
+        platform: metadata.platform,
+        handle: metadata.uploaderId || 'default',
+        displayName: metadata.uploaderName || `${metadata.platform} source`,
+        sourceUrl: contentUrl,
+        isActive: true,
+        ingestSettings: { mode: 'manual' }
+      }));
+
+      await markContentNoTranscript({
+        sourceId: source.id,
+        externalContentId: metadata.id,
+        platform: metadata.platform,
+        contentType: 'video',
+        title: metadata.title,
+        durationSeconds: metadata.durationSeconds,
+        url: metadata.url,
+        message: error?.payload?.error || error.message
+      });
       throw error;
     }
 
-    if (error?.code?.startsWith?.('P')) {
-      logTranscriptEvent(
-        'db.upsert.failed',
-        { message: error.message, code: error.code },
-        'error'
-      );
-      throw createInternalError('Failed to save transcript to the database.', {
-        code: error.code,
-        message: error.message
-      });
-    }
-
     const classification = classifyYtDlpError(error);
-
-    if (classification.type === 'no_subtitles') {
-      throw createNoTranscriptError();
+    const internalError = new Error(classification.message);
+    internalError.statusCode = classification.type === 'no_subtitles' ? 404 : 500;
+    internalError.payload = { error: classification.message };
+    if (DEV_VERBOSE_ERRORS) {
+      internalError.details = { type: classification.type, stderr: error?.stderr?.toString?.() || '', message: error?.message || '' };
     }
-
-    if (classification.type === 'restricted_video') {
-      throw createInternalError(classification.message, {
-        type: classification.type,
-        stderr: error?.stderr?.toString() || ''
-      });
-    }
-
-    if (classification.type === 'missing_binary') {
-      throw createInternalError(classification.message, {
-        type: classification.type,
-        hint: 'Install yt-dlp (https://github.com/yt-dlp/yt-dlp#installation) and ensure it is available on PATH.'
-      });
-    }
-
-    if (error?.stderr || error?.message) {
-      throw createInternalError(classification.message, {
-        type: classification.type,
-        stderr: error?.stderr?.toString() || '',
-        message: error?.message || ''
-      });
-    }
-
-    throw error;
+    throw internalError;
   }
 }
 
-export async function fetchAndStoreTranscriptByVideoId(videoId) {
-  return fetchAndStoreTranscript(`https://vimeo.com/${videoId}`);
+export async function fetchAndStoreTranscriptByExternalId({ platform = 'vimeo', externalId, source }) {
+  const contentUrl = platform === 'youtube' ? `https://www.youtube.com/watch?v=${externalId}` : `https://vimeo.com/${externalId}`;
+  return fetchAndStoreTranscript(contentUrl, source);
 }

@@ -7,26 +7,59 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Transcript {
+model Source {
+  id             String        @id @default(uuid())
+  platform       String
+  handle         String
+  displayName    String
+  sourceUrl      String
+  isActive       Boolean       @default(true)
+  ingestSettings String?
+  metadataJson   String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  contentItems   ContentItem[]
+
+  @@unique([platform, handle])
+  @@index([platform])
+  @@index([isActive])
+}
+
+model ContentItem {
   id                String   @id @default(uuid())
-  videoId           String   @unique
+  sourceId          String
+  externalContentId String
+  platform          String
+  contentType       String
   title             String
+  transcriptText    String?
+  bodyText          String?
+  transcriptJson    String?
+  url               String?
+  publishedAt       DateTime?
+  fetchedAt         DateTime @default(now())
   durationSeconds   Int?
   ingestStatus      String   @default("completed")
   ingestError       String?
-  lastAttemptedAt   DateTime?
-  transcriptText    String
-  transcriptJson    String
+  rawMetadataJson   String?
   synopsis          String?
   keyPointsJson     String?
   entitiesJson      String?
   tagsJson          String?
+  themesJson        String?
   sectionsJson      String?
   notableQuotesJson String?
   analysisStatus    String?
   analyzedAt        DateTime?
   analysisVersion   String?
-  fetchedAt         DateTime @default(now())
+  lastAttemptedAt   DateTime?
 
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, externalContentId])
+  @@index([platform])
+  @@index([sourceId])
+  @@index([fetchedAt])
+  @@index([publishedAt])
   @@index([ingestStatus])
 }
