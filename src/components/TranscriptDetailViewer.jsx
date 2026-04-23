@@ -94,16 +94,16 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
       return;
     }
 
-    const confirmed = window.confirm(`Delete transcript "${transcript.title}"? This cannot be undone.`);
+    const confirmed = window.confirm(`Delete item "${transcript.title}"? This cannot be undone.`);
 
     if (confirmed) {
       onDelete(transcript.id);
     }
   }
 
-  if (loading) return <p className="text-small text-textMuted">Loading transcript…</p>;
+  if (loading) return <p className="text-small text-textMuted">Loading content item…</p>;
   if (error) return <p className="text-small text-danger">{error}</p>;
-  if (!transcript) return <p className="text-small text-textMuted">No transcript selected. Pick one from the library.</p>;
+  if (!transcript) return <p className="text-small text-textMuted">No content item selected. Pick one from the library.</p>;
 
   return (
     <article className="space-y-3">
@@ -116,11 +116,13 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
             disabled={deleting}
             className="rounded-md border border-danger px-2 py-1 text-small font-semibold text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {deleting ? 'Deleting…' : 'Delete transcript'}
+            {deleting ? 'Deleting…' : 'Delete item'}
           </button>
         </div>
 
+        <p className="text-small text-textMuted">Source: {transcript.source?.displayName || transcript.source?.handle || 'Unknown'} ({transcript.platform})</p>
         <p className="text-small text-textMuted">Fetched: {formatDate(transcript.fetchedAt)}</p>
+        {transcript.publishedAt ? <p className="text-small text-textMuted">Published: {formatDate(transcript.publishedAt)}</p> : null}
         <p className="text-small text-textMuted">Duration: {formatDuration(transcript.durationSeconds)}</p>
 
         {transcript.synopsis ? (
@@ -153,7 +155,7 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
             ))}
           </div>
         ) : (
-          <p className="whitespace-pre-wrap break-words text-body text-text">No transcript text available.</p>
+          <p className="whitespace-pre-wrap break-words text-body text-text">No transcript/body text available.</p>
         )}
       </div>
     </article>
