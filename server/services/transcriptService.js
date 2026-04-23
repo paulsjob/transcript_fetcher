@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import ytDlp from 'yt-dlp-exec';
@@ -42,7 +42,7 @@ async function getVideoMetadata(videoUrl) {
   };
 }
 
-async function extractTranscript(videoUrl) {
+async function extractTranscript(videoUrl, videoId) {
   const workdir = await mkdtemp(path.join(tmpdir(), 'vimeo-transcript-'));
   const outputTemplate = path.join(workdir, '%(id)s.%(ext)s');
 
@@ -80,8 +80,10 @@ async function extractTranscript(videoUrl) {
       throw attemptError;
     }
 
-    const files = await readdir(workdir);
-    const vttFile = files.find((file) => file.endsWith('.vtt'));
+    const files = readdirSync(workdir);
+    const vttFile = files.find(
+      (file) => file.startsWith(`${videoId}.`) && file.endsWith('.vtt')
+    );
 
     if (!vttFile) {
       throw createNoTranscriptError();
@@ -92,8 +94,13 @@ async function extractTranscript(videoUrl) {
       throw createNoTranscriptError();
     }
 
-    const vttContent = await readFile(vttFilePath, 'utf-8');
-    const transcript = parseVttToTranscript(vttContent);
+    let transcript = [];
+    try {
+      const vttContent = await readFile(vttFilePath, 'utf-8');
+      transcript = parseVttToTranscript(vttContent);
+    } finally {
+      await rm(vttFilePath, { force: true });
+    }
 
     if (!transcript.length) {
       throw createNoTranscriptError();
@@ -108,7 +115,7 @@ async function extractTranscript(videoUrl) {
 export async function fetchAndStoreTranscript(videoUrl) {
   try {
     const metadata = await getVideoMetadata(videoUrl);
-    const transcript = await extractTranscript(videoUrl);
+    const transcript = await extractTranscript(videoUrl, metadata.id);
 
     await upsertTranscript({
       videoId: metadata.id,
