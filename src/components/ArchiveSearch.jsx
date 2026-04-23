@@ -119,7 +119,7 @@ export default function ArchiveSearch({ onSelectResult }) {
           <article
             key={result.id}
             className="cursor-pointer rounded-md border border-border bg-surface p-2 shadow-subtle"
-            onClick={() => onSelectResult?.(result.id)}
+            onClick={() => onSelectResult?.(result, debouncedQuery)}
           >
             <h2 className="text-body font-semibold text-text">{result.title}</h2>
             <p className="mt-1 text-small text-textMuted">{highlightText(result.snippet, debouncedQuery)}</p>

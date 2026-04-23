@@ -13,6 +13,10 @@ const DEV_VERBOSE_ERRORS =
   process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
 
 function buildSnippet(text, query, radius = 90) {
+  if (!text) {
+    return '';
+  }
+
   const normalizedText = text.toLowerCase();
   const normalizedQuery = query.toLowerCase();
   const matchIndex = normalizedText.indexOf(normalizedQuery);
@@ -32,6 +36,70 @@ function buildSnippet(text, query, radius = 90) {
   return `${prefix}${snippet}${suffix}`;
 }
 
+function safeParseTranscriptEntries(transcriptJson) {
+  if (Array.isArray(transcriptJson)) {
+    return transcriptJson;
+  }
+
+  if (typeof transcriptJson !== 'string') {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(transcriptJson);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function extractMatchText(text, query) {
+  if (!text || !query) {
+    return query || '';
+  }
+
+  const normalizedText = text.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  const index = normalizedText.indexOf(normalizedQuery);
+
+  if (index === -1) {
+    return query;
+  }
+
+  return text.slice(index, index + query.length);
+}
+
+function deriveMatchMetadata(record, query) {
+  const entries = safeParseTranscriptEntries(record.transcriptJson);
+  const normalizedQuery = query.toLowerCase();
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const lineText = typeof entries[index]?.text === 'string' ? entries[index].text : '';
+    if (!lineText.toLowerCase().includes(normalizedQuery)) {
+      continue;
+    }
+
+    return {
+      snippet: buildSnippet(lineText, query),
+      matchText: extractMatchText(lineText, query),
+      bestLineIndex: index,
+      bestTimestamp: entries[index]?.timestamp || null,
+      matchSource: 'transcriptJson'
+    };
+  }
+
+  const fallbackSnippet = buildSnippet(record.transcriptText || record.title || '', query);
+  const fallbackText = extractMatchText(record.transcriptText || record.title || '', query);
+
+  return {
+    snippet: fallbackSnippet,
+    matchText: fallbackText,
+    bestLineIndex: null,
+    bestTimestamp: null,
+    matchSource: entries.length ? 'transcriptJson-unmatched' : 'transcriptText'
+  };
+}
+
 router.get('/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
 
@@ -41,12 +109,21 @@ router.get('/search', async (req, res) => {
 
   try {
     const records = await searchTranscripts(q);
-    const payload = records.map((record) => ({
-      id: record.id,
-      videoId: record.videoId,
-      title: record.title,
-      snippet: buildSnippet(record.transcriptText, q)
-    }));
+    const payload = records.map((record) => {
+      const metadata = deriveMatchMetadata(record, q);
+
+      return {
+        id: record.id,
+        videoId: record.videoId,
+        title: record.title,
+        snippet: metadata.snippet,
+        matchQuery: q,
+        matchText: metadata.matchText,
+        bestLineIndex: metadata.bestLineIndex,
+        bestTimestamp: metadata.bestTimestamp,
+        matchSource: metadata.matchSource
+      };
+    });
 
     return res.json(payload);
   } catch (error) {
