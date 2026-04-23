@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,12 @@ function mapYtDlpError(error = null) {
   }
 
   return 'Failed to fetch transcript with yt-dlp.';
+}
+
+function createNoTranscriptError() {
+  const error = new Error('No transcript available for this video.');
+  error.statusCode = 404;
+  return error;
 }
 
 async function getVideoMetadata(videoUrl) {
@@ -39,27 +46,36 @@ async function extractTranscript(videoUrl) {
   const outputTemplate = path.join(workdir, 'transcript.%(ext)s');
 
   try {
-    await ytDlp(videoUrl, {
-      writeAutoSubs: true,
-      writeSubs: true,
-      subFormat: 'vtt',
-      skipDownload: true,
-      noPlaylist: true,
-      output: outputTemplate
-    });
+    try {
+      await ytDlp(videoUrl, {
+        writeAutoSubs: true,
+        writeSubs: true,
+        subFormat: 'vtt',
+        skipDownload: true,
+        noPlaylist: true,
+        output: outputTemplate
+      });
+    } catch (error) {
+      throw createNoTranscriptError();
+    }
 
     const files = await readdir(workdir);
     const vttFile = files.find((file) => file.endsWith('.vtt'));
 
     if (!vttFile) {
-      throw new Error('No subtitles were found for this video.');
+      throw createNoTranscriptError();
     }
 
-    const vttContent = await readFile(path.join(workdir, vttFile), 'utf-8');
+    const vttFilePath = path.join(workdir, vttFile);
+    if (!existsSync(vttFilePath)) {
+      throw createNoTranscriptError();
+    }
+
+    const vttContent = await readFile(vttFilePath, 'utf-8');
     const transcript = parseVttToTranscript(vttContent);
 
     if (!transcript.length) {
-      throw new Error('Subtitles were found, but no readable transcript lines were parsed.');
+      throw createNoTranscriptError();
     }
 
     return transcript;
@@ -85,6 +101,10 @@ export async function fetchAndStoreTranscript(videoUrl) {
       transcript
     };
   } catch (error) {
+    if (error?.statusCode === 404) {
+      throw error;
+    }
+
     if (error?.stderr || error?.message) {
       throw new Error(mapYtDlpError(error));
     }

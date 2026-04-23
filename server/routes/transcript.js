@@ -62,6 +62,10 @@ router.post('/fetch-transcript', async (req, res) => {
     const result = await fetchAndStoreTranscript(videoUrl.trim());
     return res.json(result);
   } catch (error) {
+    if (error?.statusCode === 404) {
+      return res.status(404).json({ error: 'No transcript available for this video.' });
+    }
+
     return res.status(500).json({ error: error.message || 'Failed to fetch transcript.' });
   }
 });
