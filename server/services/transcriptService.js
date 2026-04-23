@@ -5,6 +5,7 @@ import path from 'node:path';
 import ytDlp from 'yt-dlp-exec';
 import { parseVttToTranscript } from '../utils/parseVtt.js';
 import { upsertTranscript } from '../repositories/transcriptRepository.js';
+import { analyzeTranscript } from './transcriptAnalysisService.js';
 
 const DEV_VERBOSE_ERRORS =
   process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
@@ -102,12 +103,14 @@ async function getVideoMetadata(videoUrl) {
 
   const metadata = {
     id: parsed.id,
-    title: parsed.title || 'Untitled Vimeo Video'
+    title: parsed.title || 'Untitled Vimeo Video',
+    durationSeconds: Number.isFinite(parsed.duration) ? Math.round(parsed.duration) : null
   };
 
   logTranscriptEvent('metadata.fetch.success', {
     videoId: metadata.id,
-    title: metadata.title
+    title: metadata.title,
+    durationSeconds: metadata.durationSeconds
   });
 
   return metadata;
@@ -212,22 +215,62 @@ export async function fetchAndStoreTranscript(videoUrl) {
   try {
     const metadata = await getVideoMetadata(videoUrl);
     const transcript = await extractTranscript(videoUrl, metadata.id);
+    const transcriptText = transcript.map((entry) => entry.text).join(' ').trim();
+
+    let analysis = null;
+    try {
+      analysis = await analyzeTranscript({
+        title: metadata.title,
+        durationSeconds: metadata.durationSeconds,
+        transcript,
+        transcriptText
+      });
+      logTranscriptEvent('analysis.complete', {
+        videoId: metadata.id,
+        status: analysis.analysisStatus,
+        version: analysis.analysisVersion
+      });
+    } catch (analysisError) {
+      logTranscriptEvent(
+        'analysis.failed',
+        {
+          videoId: metadata.id,
+          message: analysisError?.message || 'Unknown analysis error'
+        },
+        'error'
+      );
+      analysis = {
+        analysisStatus: 'failed',
+        analysisVersion: null,
+        analyzedAt: new Date(),
+        synopsis: null,
+        keyPoints: [],
+        themes: [],
+        tags: [],
+        notableQuotes: []
+      };
+    }
 
     logTranscriptEvent('db.upsert.start', {
       videoId: metadata.id,
       title: metadata.title,
-      segments: transcript.length
+      durationSeconds: metadata.durationSeconds,
+      segments: transcript.length,
+      analysisStatus: analysis?.analysisStatus || null
     });
     await upsertTranscript({
       videoId: metadata.id,
       title: metadata.title,
-      transcript
+      durationSeconds: metadata.durationSeconds,
+      transcript,
+      analysis
     });
     logTranscriptEvent('db.upsert.success', { videoId: metadata.id });
 
     return {
       videoId: metadata.id,
       title: metadata.title,
+      durationSeconds: metadata.durationSeconds,
       transcript
     };
   } catch (error) {

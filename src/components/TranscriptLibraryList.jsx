@@ -47,7 +47,10 @@ function matchesFilter(item, query) {
   return (
     item.title.toLowerCase().includes(normalized) ||
     item.videoId.toLowerCase().includes(normalized) ||
-    (item.preview || '').toLowerCase().includes(normalized)
+    (item.preview || '').toLowerCase().includes(normalized) ||
+    (item.synopsis || '').toLowerCase().includes(normalized) ||
+    (item.tags || []).some((tag) => `${tag}`.toLowerCase().includes(normalized)) ||
+    (item.themes || []).some((theme) => `${theme}`.toLowerCase().includes(normalized))
   );
 }
 
@@ -81,7 +84,7 @@ export default function TranscriptLibraryList({ items, selectedId, loading, erro
             type="text"
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="Search title, video ID, preview"
+            placeholder="Search title, video ID, synopsis, themes, tags"
             className="w-full rounded-md border border-border bg-surface px-2 py-1 text-body text-text outline-none transition focus:border-focus"
           />
         </label>
@@ -128,7 +131,15 @@ export default function TranscriptLibraryList({ items, selectedId, loading, erro
                 {isSelected ? <span className="text-small font-semibold text-brand-secondary">Selected</span> : null}
               </div>
               <p className="font-mono text-small text-textMuted">Video ID: {item.videoId}</p>
+              {item.durationSeconds ? <p className="text-small text-textMuted">Duration: {Math.round(item.durationSeconds)}s</p> : null}
               <p className="text-small text-textMuted">Fetched: {formatDate(item.fetchedAt)}</p>
+              {item.themes?.length ? (
+                <p className="text-small text-textMuted">Themes: {item.themes.join(', ')}</p>
+              ) : null}
+              {item.tags?.length ? <p className="text-small text-textMuted">Tags: {item.tags.slice(0, 6).join(', ')}</p> : null}
+              {item.analysisStatus ? (
+                <p className="text-small text-textMuted">Analysis: {item.analysisStatus}</p>
+              ) : null}
               {item.preview ? <p className="mt-1 text-small text-textMuted">{item.preview}</p> : null}
             </button>
           );

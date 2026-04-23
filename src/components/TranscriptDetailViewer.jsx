@@ -298,7 +298,55 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
             <dt className="font-semibold text-text">Title</dt>
             <dd>{transcript.title}</dd>
           </div>
+          <div>
+            <dt className="font-semibold text-text">Duration</dt>
+            <dd>{transcript.durationSeconds ? `${Math.round(transcript.durationSeconds)} seconds` : 'Unknown'}</dd>
+          </div>
+          <div>
+            <dt className="font-semibold text-text">Analysis status</dt>
+            <dd>{transcript.analysisStatus || 'Not run'}</dd>
+          </div>
         </dl>
+
+        {transcript.synopsis ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Synopsis</h4>
+            <p className="text-small text-textMuted">{transcript.synopsis}</p>
+          </section>
+        ) : null}
+
+        {transcript.keyPoints?.length ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Key takeaways</h4>
+            <ul className="list-disc space-y-1 pl-5 text-small text-textMuted">
+              {transcript.keyPoints.map((point, index) => (
+                <li key={`${point}-${index}`}>{point}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {transcript.themes?.length || transcript.tags?.length ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Discovery metadata</h4>
+            {transcript.themes?.length ? <p className="text-small text-textMuted">Themes: {transcript.themes.join(', ')}</p> : null}
+            {transcript.tags?.length ? <p className="text-small text-textMuted">Tags: {transcript.tags.join(', ')}</p> : null}
+          </section>
+        ) : null}
+
+        {transcript.notableQuotes?.length ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Notable quotes</h4>
+            <ul className="space-y-1 text-small text-textMuted">
+              {transcript.notableQuotes.map((item, index) => (
+                <li key={`${item.quote}-${index}`}>
+                  {item.timestamp ? <span className="font-mono text-text">[{item.timestamp}] </span> : null}
+                  {item.quote}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         {query ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surfaceSubtle p-2 text-small">
