@@ -8,6 +8,10 @@ export async function fetchTranscript(url) {
   const payload = await response.json();
 
   if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error(payload.error || 'No transcript available for this video.');
+    }
+
     throw new Error(payload.error || 'Unable to fetch transcript.');
   }
 
