@@ -1,119 +1,41 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchTranscriptText, fetchUserVideos, fetchVideoTextTracks, normalizeTranscriptText } from './api/vimeo';
-import LayoutShell from './components/LayoutShell';
-import TokenConfig from './components/TokenConfig';
-import TranscriptView from './components/TranscriptView';
-import VideoList from './components/VideoList';
+import { useState } from 'react';
+import { fetchTranscript } from './api/transcript';
+import TranscriptPanel from './components/TranscriptPanel';
+import UrlInputForm from './components/UrlInputForm';
 
 function App() {
-  const [tokenInput, setTokenInput] = useState('');
+  const [url, setUrl] = useState('');
+  const [transcript, setTranscript] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const [videos, setVideos] = useState([]);
-  const [videosLoading, setVideosLoading] = useState(false);
-  const [videosError, setVideosError] = useState('');
+  async function handleSubmit(event) {
+    event.preventDefault();
 
-  const [selectedVideo, setSelectedVideo] = useState(null);
-  const [tracks, setTracks] = useState([]);
-  const [tracksLoading, setTracksLoading] = useState(false);
-  const [tracksError, setTracksError] = useState('');
-
-  const [activeTrackId, setActiveTrackId] = useState('');
-  const [transcriptText, setTranscriptText] = useState('');
-  const [transcriptLoading, setTranscriptLoading] = useState(false);
-  const [transcriptError, setTranscriptError] = useState('');
-
-  const selectedVideoId = useMemo(() => selectedVideo?.id ?? '', [selectedVideo]);
-
-  const loadVideos = useCallback(async () => {
-    setVideosLoading(true);
-    setVideosError('');
-    setSelectedVideo(null);
-    setTracks([]);
-    setTranscriptText('');
+    setLoading(true);
+    setError('');
+    setTranscript([]);
 
     try {
-      const nextVideos = await fetchUserVideos(tokenInput);
-      setVideos(nextVideos);
-    } catch (error) {
-      setVideos([]);
-      setVideosError(error.message);
+      const data = await fetchTranscript(url);
+      setTranscript(data);
+    } catch (fetchError) {
+      setError(fetchError.message);
     } finally {
-      setVideosLoading(false);
+      setLoading(false);
     }
-  }, [tokenInput]);
-
-  useEffect(() => {
-    loadVideos();
-  }, [loadVideos]);
-
-  const handleSelectVideo = useCallback(
-    async (video) => {
-      setSelectedVideo(video);
-      setTracksLoading(true);
-      setTracksError('');
-      setTracks([]);
-      setActiveTrackId('');
-      setTranscriptText('');
-      setTranscriptError('');
-
-      try {
-        const nextTracks = await fetchVideoTextTracks(video.id, tokenInput);
-        setTracks(nextTracks);
-      } catch (error) {
-        setTracksError(error.message);
-      } finally {
-        setTracksLoading(false);
-      }
-    },
-    [tokenInput]
-  );
-
-  const handleSelectTrack = useCallback(
-    async (track) => {
-      setActiveTrackId(track.id);
-      setTranscriptLoading(true);
-      setTranscriptError('');
-      setTranscriptText('');
-
-      try {
-        const rawTranscript = await fetchTranscriptText(track.link, tokenInput);
-        setTranscriptText(normalizeTranscriptText(rawTranscript));
-      } catch (error) {
-        setTranscriptError(error.message);
-      } finally {
-        setTranscriptLoading(false);
-      }
-    },
-    [tokenInput]
-  );
+  }
 
   return (
-    <LayoutShell>
-      <TokenConfig
-        tokenInput={tokenInput}
-        onTokenInput={setTokenInput}
-        onReloadVideos={loadVideos}
-        disabled={videosLoading}
-      />
-      <VideoList
-        videos={videos}
-        activeVideoId={selectedVideoId}
-        onSelectVideo={handleSelectVideo}
-        loading={videosLoading}
-        error={videosError}
-      />
-      <TranscriptView
-        selectedVideo={selectedVideo}
-        loadingTracks={tracksLoading}
-        tracksError={tracksError}
-        tracks={tracks}
-        activeTrackId={activeTrackId}
-        onSelectTrack={handleSelectTrack}
-        loadingTranscript={transcriptLoading}
-        transcriptText={transcriptText}
-        transcriptError={transcriptError}
-      />
-    </LayoutShell>
+    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-4 bg-background px-3 py-4">
+      <header className="space-y-1">
+        <h1 className="text-h1 text-text">Vimeo Transcript Fetcher</h1>
+        <p className="text-body text-textMuted">Paste a public Vimeo link to extract subtitles with yt-dlp.</p>
+      </header>
+
+      <UrlInputForm url={url} onUrlChange={setUrl} onSubmit={handleSubmit} loading={loading} />
+      <TranscriptPanel transcript={transcript} loading={loading} error={error} />
+    </main>
   );
 }
 
