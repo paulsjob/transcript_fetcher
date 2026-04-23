@@ -68,6 +68,14 @@ export async function getTranscriptById(id) {
   });
 }
 
+export async function deleteTranscriptById(id) {
+  const result = await prisma.transcript.deleteMany({
+    where: { id }
+  });
+
+  return result.count > 0;
+}
+
 export async function findAllVideoIds() {
   const rows = await prisma.transcript.findMany({
     select: { videoId: true }
