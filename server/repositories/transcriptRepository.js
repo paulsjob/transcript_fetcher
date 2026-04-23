@@ -21,6 +21,24 @@ export async function upsertTranscript({ videoId, title, transcript }) {
   });
 }
 
+export async function searchTranscripts(query) {
+  return prisma.transcript.findMany({
+    where: {
+      OR: [{ title: { contains: query } }, { transcriptText: { contains: query } }]
+    },
+    select: {
+      id: true,
+      videoId: true,
+      title: true,
+      transcriptText: true
+    },
+    orderBy: {
+      fetchedAt: 'desc'
+    },
+    take: 50
+  });
+}
+
 export async function findAllVideoIds() {
   const rows = await prisma.transcript.findMany({
     select: { videoId: true }
