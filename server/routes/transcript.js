@@ -4,6 +4,8 @@ import { searchTranscripts } from '../repositories/transcriptRepository.js';
 import { isValidVimeoUrl } from '../utils/validate.js';
 
 const router = Router();
+const DEV_VERBOSE_ERRORS =
+  process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
 
 function buildSnippet(text, query, radius = 90) {
   const normalizedText = text.toLowerCase();
@@ -66,7 +68,12 @@ router.post('/fetch-transcript', async (req, res) => {
       return res.status(404).json(error.payload || { error: 'No subtitles available for this video' });
     }
 
-    return res.status(500).json({ error: error.message || 'Failed to fetch transcript.' });
+    const response = { error: error.message || 'Failed to fetch transcript.' };
+    if (DEV_VERBOSE_ERRORS && error?.details) {
+      response.details = error.details;
+    }
+
+    return res.status(500).json(response);
   }
 });
 
