@@ -39,6 +39,35 @@ export async function searchTranscripts(query) {
   });
 }
 
+export async function listTranscripts() {
+  return prisma.transcript.findMany({
+    select: {
+      id: true,
+      videoId: true,
+      title: true,
+      fetchedAt: true,
+      transcriptText: true
+    },
+    orderBy: {
+      fetchedAt: 'desc'
+    }
+  });
+}
+
+export async function getTranscriptById(id) {
+  return prisma.transcript.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      videoId: true,
+      title: true,
+      fetchedAt: true,
+      transcriptJson: true,
+      transcriptText: true
+    }
+  });
+}
+
 export async function findAllVideoIds() {
   const rows = await prisma.transcript.findMany({
     select: { videoId: true }

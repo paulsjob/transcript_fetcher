@@ -26,7 +26,7 @@ function highlightText(text, query) {
   );
 }
 
-export default function ArchiveSearch() {
+export default function ArchiveSearch({ onSelectResult }) {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [loading, setLoading] = useState(false);
@@ -116,7 +116,11 @@ export default function ArchiveSearch() {
 
       <div className="space-y-1">
         {results.map((result) => (
-          <article key={result.id} className="rounded-md border border-border bg-surface p-2 shadow-subtle">
+          <article
+            key={result.id}
+            className="cursor-pointer rounded-md border border-border bg-surface p-2 shadow-subtle"
+            onClick={() => onSelectResult?.(result.id)}
+          >
             <h2 className="text-body font-semibold text-text">{result.title}</h2>
             <p className="mt-1 text-small text-textMuted">{highlightText(result.snippet, debouncedQuery)}</p>
             <p className="mt-1 font-mono text-small text-textMuted">Video ID: {result.videoId}</p>
