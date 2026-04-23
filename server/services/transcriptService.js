@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import ytDlp from 'yt-dlp-exec';
 import { parseVttToTranscript } from '../utils/parseVtt.js';
-import { upsertTranscript } from '../repositories/transcriptRepository.js';
+import { markNoSubtitles, upsertTranscript } from '../repositories/transcriptRepository.js';
 import { analyzeTranscript } from './transcriptAnalysisService.js';
 
 const DEV_VERBOSE_ERRORS =
@@ -212,8 +212,10 @@ async function extractTranscript(videoUrl, videoId) {
 }
 
 export async function fetchAndStoreTranscript(videoUrl) {
+  let metadata = null;
+
   try {
-    const metadata = await getVideoMetadata(videoUrl);
+    metadata = await getVideoMetadata(videoUrl);
     const transcript = await extractTranscript(videoUrl, metadata.id);
     const transcriptText = transcript.map((entry) => entry.text).join(' ').trim();
 
@@ -263,7 +265,9 @@ export async function fetchAndStoreTranscript(videoUrl) {
       title: metadata.title,
       durationSeconds: metadata.durationSeconds,
       transcript,
-      analysis
+      analysis,
+      ingestStatus: 'completed',
+      ingestError: null
     });
     logTranscriptEvent('db.upsert.success', { videoId: metadata.id });
 
@@ -275,6 +279,26 @@ export async function fetchAndStoreTranscript(videoUrl) {
     };
   } catch (error) {
     if (error?.statusCode === 404) {
+      if (metadata?.id) {
+        try {
+          await markNoSubtitles({
+            videoId: metadata.id,
+            title: metadata.title,
+            durationSeconds: metadata.durationSeconds,
+            message: error?.payload?.error || error.message
+          });
+          logTranscriptEvent('db.mark_no_subtitles.success', { videoId: metadata.id });
+        } catch (markError) {
+          logTranscriptEvent(
+            'db.mark_no_subtitles.failed',
+            {
+              videoId: metadata.id,
+              message: markError?.message || 'Failed to persist no-subtitles marker'
+            },
+            'error'
+          );
+        }
+      }
       throw error;
     }
 

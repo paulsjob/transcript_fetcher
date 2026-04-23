@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "start": "node server/index.js",
     "prisma:generate": "prisma generate",
+    "prisma:db:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev --name init_transcript_archive"
   },
   "dependencies": {

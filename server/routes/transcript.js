@@ -100,6 +100,23 @@ function deriveMatchMetadata(record, query) {
   };
 }
 
+function logRouteError(route, error, extras = {}) {
+  if (!DEV_VERBOSE_ERRORS) {
+    return;
+  }
+
+  console.error({
+    scope: 'api',
+    route,
+    message: error?.message || 'Unknown error',
+    code: error?.code,
+    name: error?.name,
+    meta: error?.meta,
+    details: error?.details,
+    ...extras
+  });
+}
+
 router.get('/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
 
@@ -130,6 +147,7 @@ router.get('/search', async (req, res) => {
 
     return res.json(payload);
   } catch (error) {
+    logRouteError('/api/search', error, { query: q });
     return res.status(500).json({ error: 'Failed to search transcripts.' });
   }
 });
@@ -153,6 +171,7 @@ router.get('/transcripts', async (_req, res) => {
 
     return res.json(payload);
   } catch (error) {
+    logRouteError('/api/transcripts', error);
     return res.status(500).json({ error: 'Failed to load transcript library.' });
   }
 });
@@ -167,6 +186,7 @@ router.get('/transcripts/:id', async (req, res) => {
 
     return res.json(record);
   } catch (error) {
+    logRouteError('/api/transcripts/:id', error, { id: req.params.id });
     return res.status(500).json({ error: 'Failed to load transcript.' });
   }
 });
@@ -181,6 +201,7 @@ router.delete('/transcripts/:id', async (req, res) => {
 
     return res.json({ ok: true });
   } catch (error) {
+    logRouteError('/api/transcripts/:id DELETE', error, { id: req.params.id });
     return res.status(500).json({ error: 'Failed to delete transcript.' });
   }
 });
@@ -200,6 +221,7 @@ router.post('/fetch-transcript', async (req, res) => {
     const result = await fetchAndStoreTranscript(videoUrl.trim());
     return res.json(result);
   } catch (error) {
+    logRouteError('/api/fetch-transcript', error, { videoUrl: videoUrl.trim() });
     if (error?.statusCode === 404) {
       return res.status(404).json(error.payload || { error: 'No subtitles available for this video' });
     }
