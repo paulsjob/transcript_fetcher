@@ -173,6 +173,7 @@ function App() {
             error={detailError}
             onDelete={handleDeleteTranscript}
             deleting={deleteLoading}
+            activeSearchTerm={libraryOptions.q}
           />
         </section>
       </section>

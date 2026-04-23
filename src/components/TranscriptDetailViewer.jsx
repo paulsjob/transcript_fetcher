@@ -57,7 +57,36 @@ function formatDuration(seconds) {
   return `${minutes}m ${remainingSeconds}s`;
 }
 
-export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting }) {
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightText(text, query) {
+  const normalizedQuery = query.trim();
+
+  if (!normalizedQuery) {
+    return text;
+  }
+
+  const pattern = new RegExp(`(${escapeRegex(normalizedQuery)})`, 'ig');
+  const parts = text.split(pattern);
+
+  if (parts.length === 1) {
+    return text;
+  }
+
+  return parts.map((part, index) =>
+    part.toLowerCase() === normalizedQuery.toLowerCase() ? (
+      <mark key={`${part}-${index}`} className="rounded-sm bg-amber-200/80 px-0.5 text-text">
+        {part}
+      </mark>
+    ) : (
+      <span key={`${part}-${index}`}>{part}</span>
+    )
+  );
+}
+
+export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting, activeSearchTerm = '' }) {
   const entries = toEntries(transcript?.transcriptJson, transcript?.transcriptText);
 
   function handleDelete() {
@@ -119,7 +148,7 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
             {entries.map((line, index) => (
               <div key={`${line.timestamp || 'line'}-${index}`} className="grid grid-cols-[72px_1fr] gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
                 <span className="font-mono text-small text-textMuted">{line.timestamp || '—'}</span>
-                <p className="whitespace-pre-wrap break-words text-body text-text">{line.text || ''}</p>
+                <p className="whitespace-pre-wrap break-words text-body text-text">{highlightText(line.text || '', activeSearchTerm)}</p>
               </div>
             ))}
           </div>
