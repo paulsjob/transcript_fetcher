@@ -44,20 +44,40 @@ async function getVideoMetadata(videoUrl) {
 
 async function extractTranscript(videoUrl) {
   const workdir = await mkdtemp(path.join(tmpdir(), 'vimeo-transcript-'));
-  const outputTemplate = path.join(workdir, 'transcript.%(ext)s');
+  const outputTemplate = path.join(workdir, '%(id)s.%(ext)s');
+
+  const ytDlpOptions = {
+    writeAutoSubs: true,
+    writeSubs: true,
+    subLangs: 'en.*,en',
+    subFormat: 'vtt',
+    skipDownload: true,
+    noPlaylist: true,
+    output: outputTemplate
+  };
 
   try {
-    try {
-      await ytDlp(videoUrl, {
-        writeAutoSubs: true,
-        writeSubs: true,
-        subFormat: 'vtt',
-        skipDownload: true,
-        noPlaylist: true,
-        output: outputTemplate
-      });
-    } catch (error) {
-      throw createNoTranscriptError();
+    let attemptError = null;
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await ytDlp(videoUrl, ytDlpOptions);
+        attemptError = null;
+        break;
+      } catch (error) {
+        attemptError = error;
+        if (attempt === 1) {
+          console.error('yt-dlp subtitle extraction failed on first attempt:', {
+            message: error?.message || '',
+            stderr: error?.stderr || '',
+            stdout: error?.stdout || ''
+          });
+        }
+      }
+    }
+
+    if (attemptError) {
+      throw attemptError;
     }
 
     const files = await readdir(workdir);
@@ -104,6 +124,10 @@ export async function fetchAndStoreTranscript(videoUrl) {
   } catch (error) {
     if (error?.statusCode === 404) {
       throw error;
+    }
+
+    if (error?.stderr?.toString()?.toLowerCase()?.includes('subtitles')) {
+      throw createNoTranscriptError();
     }
 
     if (error?.stderr || error?.message) {
