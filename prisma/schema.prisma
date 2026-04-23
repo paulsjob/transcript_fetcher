@@ -1,0 +1,17 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Transcript {
+  id             String   @id @default(uuid())
+  videoId        String   @unique
+  title          String
+  transcriptText String
+  transcriptJson String
+  fetchedAt      DateTime @default(now())
+}
