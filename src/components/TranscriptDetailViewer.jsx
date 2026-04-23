@@ -1,5 +1,3 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-
 function safeParseTranscriptEntries(transcriptJson) {
   if (Array.isArray(transcriptJson)) {
     return transcriptJson;
@@ -47,187 +45,20 @@ function formatDate(value) {
   return date.toLocaleString();
 }
 
-function serializeWithTimestamps(entries) {
-  return entries.map((line) => `${line.timestamp} ${line.text}`.trim()).join('\n');
-}
-
-function serializeTextOnly(entries, fallbackText) {
-  if (!entries.length) {
-    return fallbackText || '';
+function formatDuration(seconds) {
+  if (!seconds) {
+    return 'Unknown';
   }
 
-  return entries.map((line) => line.text).join('\n');
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+
+  return `${minutes}m ${remainingSeconds}s`;
 }
 
-function triggerFileDownload(filename, content, contentType) {
-  const blob = new Blob([content], { type: contentType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-async function copyToClipboard(value, label) {
-  try {
-    await navigator.clipboard.writeText(value);
-  } catch {
-    window.alert(`Unable to ${label}. Copy failed in this browser.`);
-  }
-}
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function normalizeQuery(searchFocus) {
-  const query = (searchFocus?.query || searchFocus?.matchText || '').trim();
-  return query;
-}
-
-function buildHighlightedText(text, query, lineIndex, activeMatchIndex, setMatchRef, matchCounterRef) {
-  if (!query) {
-    return text;
-  }
-
-  const pattern = new RegExp(escapeRegex(query), 'gi');
-  const matches = [...text.matchAll(pattern)];
-
-  if (!matches.length) {
-    return text;
-  }
-
-  const nodes = [];
-  let cursor = 0;
-
-  matches.forEach((match, idx) => {
-    const start = match.index ?? 0;
-    const end = start + match[0].length;
-
-    if (start > cursor) {
-      nodes.push(
-        <span key={`plain-${lineIndex}-${idx}-${cursor}`}>{text.slice(cursor, start)}</span>
-      );
-    }
-
-    const globalIndex = matchCounterRef.current;
-    matchCounterRef.current += 1;
-
-    const isActive = globalIndex === activeMatchIndex;
-
-    nodes.push(
-      <mark
-        key={`match-${lineIndex}-${idx}-${start}`}
-        ref={(node) => setMatchRef(globalIndex, node)}
-        data-match-index={globalIndex}
-        className={`rounded px-0.5 ${isActive ? 'bg-amber-300 ring-1 ring-amber-500' : 'bg-yellow-200'}`}
-      >
-        {text.slice(start, end)}
-      </mark>
-    );
-
-    cursor = end;
-  });
-
-  if (cursor < text.length) {
-    nodes.push(<span key={`tail-${lineIndex}-${cursor}`}>{text.slice(cursor)}</span>);
-  }
-
-  return nodes;
-}
-
-function findInitialMatchIndex(matchLineIndices, searchFocus) {
-  if (!matchLineIndices.length) {
-    return -1;
-  }
-
-  if (Number.isInteger(searchFocus?.bestLineIndex)) {
-    const preferredLineMatch = matchLineIndices.findIndex((lineIndex) => lineIndex === searchFocus.bestLineIndex);
-    if (preferredLineMatch !== -1) {
-      return preferredLineMatch;
-    }
-  }
-
-  return 0;
-}
-
-function renderEntityBlock(label, items = [], onEntityClick) {
-  if (!items.length) {
-    return null;
-  }
-
-  return (
-    <p className="text-small text-textMuted">
-      <span className="font-semibold text-text">{label}:</span>{' '}
-      {items.map((item, index) => (
-        <button key={`${label}-${item}-${index}`} type="button" onClick={() => onEntityClick?.(item)} className="mr-1 rounded border border-border px-1 py-0.5 text-xs text-text hover:border-focus">
-          {item}
-        </button>
-      ))}
-    </p>
-  );
-}
-
-export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting, searchFocus = null, onApplyArchiveFilter }) {
-  const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
-  const matchRefs = useRef({});
-
+export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting }) {
   const entries = toEntries(transcript?.transcriptJson, transcript?.transcriptText);
-  const transcriptWithTimestamps = serializeWithTimestamps(entries);
-  const transcriptTextOnly = serializeTextOnly(entries, transcript?.transcriptText);
-  const baseFileName =
-    transcript?.title?.trim().replace(/[^a-z0-9-_]+/gi, '_').toLowerCase() || transcript?.videoId || 'transcript';
-  const query = normalizeQuery(searchFocus);
-
-  const matchLineIndices = useMemo(() => {
-    if (!query) {
-      return [];
-    }
-
-    const pattern = new RegExp(escapeRegex(query), 'i');
-    const indices = [];
-
-    entries.forEach((line, lineIndex) => {
-      const hits = line.text.match(new RegExp(escapeRegex(query), 'gi')) || [];
-      hits.forEach(() => indices.push(lineIndex));
-    });
-
-    if (!indices.length && searchFocus?.bestTimestamp) {
-      const byTimestamp = entries.findIndex((entry) => entry.timestamp === searchFocus.bestTimestamp && pattern.test(entry.text));
-      if (byTimestamp !== -1) {
-        return [byTimestamp];
-      }
-    }
-
-    return indices;
-  }, [entries, query, searchFocus?.bestTimestamp]);
-
-  useEffect(() => {
-    matchRefs.current = {};
-    const initial = findInitialMatchIndex(matchLineIndices, searchFocus);
-    setActiveMatchIndex(initial);
-  }, [transcript?.id, query, matchLineIndices, searchFocus]);
-
-  useEffect(() => {
-    if (activeMatchIndex < 0) {
-      return;
-    }
-
-    const activeNode = matchRefs.current[activeMatchIndex];
-    if (activeNode) {
-      activeNode.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-    }
-  }, [activeMatchIndex, transcript?.id]);
-
-  function setMatchRef(index, node) {
-    if (node) {
-      matchRefs.current[index] = node;
-      return;
-    }
-
-    delete matchRefs.current[index];
-  }
 
   function handleDelete() {
     if (!transcript) {
@@ -241,48 +72,12 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
     }
   }
 
-  function handleJsonDownload() {
-    if (!transcript) {
-      return;
-    }
-
-    const payload = {
-      id: transcript.id,
-      title: transcript.title,
-      videoId: transcript.videoId,
-      fetchedAt: transcript.fetchedAt,
-      lineCount: entries.length,
-      transcript: entries,
-      synopsis: transcript.synopsis,
-      keyPoints: transcript.keyPoints,
-      entities: transcript.entities,
-      tags: transcript.tags,
-      sections: transcript.sections,
-      notableQuotes: transcript.notableQuotes
-    };
-
-    triggerFileDownload(`${baseFileName}.json`, JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
-  }
-
-  function moveMatch(direction) {
-    if (!matchLineIndices.length) {
-      return;
-    }
-
-    setActiveMatchIndex((current) => {
-      const start = current < 0 ? 0 : current;
-      return (start + direction + matchLineIndices.length) % matchLineIndices.length;
-    });
-  }
-
-  const renderMatchCounterRef = { current: 0 };
-
   if (loading) return <p className="text-small text-textMuted">Loading transcript…</p>;
   if (error) return <p className="text-small text-danger">{error}</p>;
   if (!transcript) return <p className="text-small text-textMuted">No transcript selected. Pick one from the library.</p>;
 
   return (
-    <article className="space-y-2">
+    <article className="space-y-3">
       <header className="space-y-2 border-b border-border pb-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h3 className="text-h3 text-text">{transcript.title}</h3>
@@ -296,107 +91,35 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
           </button>
         </div>
 
-        <dl className="grid gap-1 text-small text-textMuted sm:grid-cols-2">
-          <div><dt className="font-semibold text-text">Video ID</dt><dd className="font-mono">{transcript.videoId}</dd></div>
-          <div><dt className="font-semibold text-text">Fetched</dt><dd>{formatDate(transcript.fetchedAt)}</dd></div>
-          <div><dt className="font-semibold text-text">Line count</dt><dd>{entries.length}</dd></div>
-          <div><dt className="font-semibold text-text">Duration</dt><dd>{transcript.durationSeconds ? `${Math.round(transcript.durationSeconds)} seconds` : 'Unknown'}</dd></div>
-          <div><dt className="font-semibold text-text">Analysis status</dt><dd>{transcript.analysisStatus || 'Not run'}</dd></div>
-          <div><dt className="font-semibold text-text">Analysis version</dt><dd>{transcript.analysisVersion || 'n/a'}</dd></div>
-        </dl>
+        <p className="text-small text-textMuted">Fetched: {formatDate(transcript.fetchedAt)}</p>
+        <p className="text-small text-textMuted">Duration: {formatDuration(transcript.durationSeconds)}</p>
 
-        {transcript.synopsis ? <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2"><h4 className="text-body font-semibold text-text">Synopsis</h4><p className="text-small text-textMuted">{transcript.synopsis}</p></section> : null}
+        {transcript.synopsis ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Synopsis</h4>
+            <p className="text-small text-textMuted">{transcript.synopsis}</p>
+          </section>
+        ) : null}
 
         {transcript.keyPoints?.length ? (
           <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
             <h4 className="text-body font-semibold text-text">Key points</h4>
             <ul className="list-disc space-y-1 pl-5 text-small text-textMuted">
-              {transcript.keyPoints.map((point, index) => <li key={`${point}-${index}`}>{point}</li>)}
-            </ul>
-          </section>
-        ) : null}
-
-        {transcript.entities ? (
-          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Entities</h4>
-            {renderEntityBlock('People', transcript.entities.people, (value) => onApplyArchiveFilter?.({ entity: value }))}
-            {renderEntityBlock('Organizations', transcript.entities.organizations, (value) => onApplyArchiveFilter?.({ entity: value }))}
-            {renderEntityBlock('Places', transcript.entities.places, (value) => onApplyArchiveFilter?.({ entity: value }))}
-            {renderEntityBlock('Programs', transcript.entities.programs, (value) => onApplyArchiveFilter?.({ entity: value }))}
-            {renderEntityBlock('Issues', transcript.entities.issues, (value) => onApplyArchiveFilter?.({ entity: value }))}
-          </section>
-        ) : null}
-
-        {transcript.tags?.length ? (
-          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Editorial tags</h4>
-            <div className="flex flex-wrap gap-1">{transcript.tags.map((tag, index) => (<button key={`${tag}-${index}`} type="button" onClick={() => onApplyArchiveFilter?.({ tag })} className="rounded border border-border px-1.5 py-0.5 text-xs text-text hover:border-focus">{tag}</button>))}</div>
-          </section>
-        ) : null}
-
-        {transcript.notableQuotes?.length ? (
-          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Notable quotes</h4>
-            <ul className="space-y-1 text-small text-textMuted">
-              {transcript.notableQuotes.map((item, index) => (
-                <li key={`${item.quote}-${index}`}>
-                  <span className="font-semibold text-text">{item.kind || 'quote'}:</span>{' '}
-                  {item.timestamp ? <span className="font-mono text-text">[{item.timestamp}] </span> : null}
-                  {item.quote}
-                  {item.rationale ? <span> — {item.rationale}</span> : null}
-                </li>
+              {transcript.keyPoints.map((point, index) => (
+                <li key={`${point}-${index}`}>{point}</li>
               ))}
             </ul>
           </section>
         ) : null}
-
-        {transcript.sections?.length ? (
-          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Sections</h4>
-            <ul className="space-y-1 text-small text-textMuted">
-              {transcript.sections.map((section, index) => (
-                <li key={`${section.label}-${index}`}>
-                  <span className="font-semibold text-text">{section.label}</span>{' '}
-                  {(section.startTimestamp || section.endTimestamp) ? `(${section.startTimestamp || '—'} → ${section.endTimestamp || '—'}) ` : ''}
-                  <span>{section.summary}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
-        {query ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surfaceSubtle p-2 text-small">
-            <span className="text-textMuted">Matches for <strong className="text-text">“{query}”</strong>: {matchLineIndices.length}</span>
-            {matchLineIndices.length ? (
-              <>
-                <button type="button" onClick={() => moveMatch(-1)} className="rounded-md border border-border px-2 py-1 text-text transition hover:border-focus">Previous</button>
-                <button type="button" onClick={() => moveMatch(1)} className="rounded-md border border-border px-2 py-1 text-text transition hover:border-focus">Next</button>
-                <span className="text-textMuted">Active: {activeMatchIndex + 1}</span>
-              </>
-            ) : (
-              <span className="text-textMuted">No exact line match found; showing transcript with best-effort highlighting.</span>
-            )}
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap gap-1">
-          <button type="button" onClick={() => copyToClipboard(transcriptWithTimestamps, 'copy transcript')} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Copy full transcript</button>
-          <button type="button" onClick={() => copyToClipboard(transcriptTextOnly, 'copy transcript text')} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Copy transcript text only</button>
-          <button type="button" onClick={() => triggerFileDownload(`${baseFileName}.txt`, transcriptWithTimestamps, 'text/plain;charset=utf-8')} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Download .txt</button>
-          <button type="button" onClick={handleJsonDownload} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Download .json</button>
-        </div>
       </header>
 
       <div className="max-h-[65vh] overflow-y-auto rounded-md border border-border bg-surfaceSubtle p-2">
         {entries.length ? (
           <div className="space-y-2">
             {entries.map((line, index) => (
-              <div key={`${line.timestamp || 'line'}-${index}`} id={`transcript-line-${index}`} className="grid grid-cols-[72px_1fr] gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
+              <div key={`${line.timestamp || 'line'}-${index}`} className="grid grid-cols-[72px_1fr] gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
                 <span className="font-mono text-small text-textMuted">{line.timestamp || '—'}</span>
-                <p className="whitespace-pre-wrap break-words text-body text-text">
-                  {buildHighlightedText(line.text || '', query, index, activeMatchIndex, setMatchRef, renderMatchCounterRef)}
-                </p>
+                <p className="whitespace-pre-wrap break-words text-body text-text">{line.text || ''}</p>
               </div>
             ))}
           </div>
