@@ -6,18 +6,80 @@ import ytDlp from 'yt-dlp-exec';
 import { parseVttToTranscript } from '../utils/parseVtt.js';
 import { upsertTranscript } from '../repositories/transcriptRepository.js';
 
-function mapYtDlpError(error = null) {
-  const stderr = (error?.stderr || error?.message || '').toString().toLowerCase();
+const DEV_VERBOSE_ERRORS =
+  process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
 
-  if (stderr.includes('unsupported url')) {
-    return 'Unsupported video URL.';
+function logTranscriptEvent(event, context = {}, level = 'info') {
+  const payload = { scope: 'transcript-fetch', event, ...context };
+
+  if (level === 'error') {
+    console.error(payload);
+    return;
   }
 
-  if (stderr.includes('subtitles') || stderr.includes('no subtitles')) {
-    return 'No subtitles were found for this video.';
+  console.log(payload);
+}
+
+function normalizeErrorText(error = null) {
+  return `${error?.stderr || ''}\n${error?.message || ''}`.toLowerCase();
+}
+
+function classifyYtDlpError(error = null) {
+  const details = normalizeErrorText(error);
+
+  if (
+    error?.code === 'ENOENT' ||
+    details.includes('spawn') ||
+    details.includes('enoent')
+  ) {
+    return {
+      type: 'missing_binary',
+      message:
+        'yt-dlp executable is unavailable. Install yt-dlp on your system or set YT_DLP_PATH to a valid binary path.'
+    };
   }
 
-  return 'Failed to fetch transcript with yt-dlp.';
+  if (
+    details.includes('private') ||
+    details.includes('password') ||
+    details.includes('login required') ||
+    details.includes('forbidden') ||
+    details.includes('http error 403')
+  ) {
+    return {
+      type: 'restricted_video',
+      message: 'Video is private or restricted; subtitles could not be accessed.'
+    };
+  }
+
+  if (
+    details.includes('no subtitles') ||
+    details.includes('no automatic captions') ||
+    details.includes('subtitles are not available')
+  ) {
+    return {
+      type: 'no_subtitles',
+      message: 'No subtitles were found for this video.'
+    };
+  }
+
+  if (details.includes('unsupported url')) {
+    return { type: 'unsupported_url', message: 'Unsupported video URL.' };
+  }
+
+  return {
+    type: 'extract_failed',
+    message: 'Failed to fetch transcript with yt-dlp.'
+  };
+}
+
+function createInternalError(message, details = null) {
+  const error = new Error(message);
+  error.statusCode = 500;
+  if (details) {
+    error.details = details;
+  }
+  return error;
 }
 
 function createNoTranscriptError() {
@@ -28,18 +90,61 @@ function createNoTranscriptError() {
 }
 
 async function getVideoMetadata(videoUrl) {
-  const jsonOutput = await ytDlp(videoUrl, {
+  logTranscriptEvent('metadata.fetch.start', { videoUrl });
+
+  const jsonOutput = await runYtDlp(videoUrl, {
     dumpSingleJson: true,
     skipDownload: true,
     noWarnings: true,
     noCallHome: true
   });
+  const parsed = typeof jsonOutput === 'string' ? JSON.parse(jsonOutput) : jsonOutput;
 
-  const parsed = JSON.parse(jsonOutput);
-  return {
+  const metadata = {
     id: parsed.id,
     title: parsed.title || 'Untitled Vimeo Video'
   };
+
+  logTranscriptEvent('metadata.fetch.success', {
+    videoId: metadata.id,
+    title: metadata.title
+  });
+
+  return metadata;
+}
+
+const ytDlpRunners = [
+  { name: 'package_binary', runner: ytDlp },
+  { name: 'system_binary', runner: ytDlp.create(process.env.YT_DLP_PATH || 'yt-dlp') }
+];
+
+async function runYtDlp(url, options) {
+  let lastError = null;
+
+  for (const candidate of ytDlpRunners) {
+    try {
+      return await candidate.runner(url, options);
+    } catch (error) {
+      lastError = error;
+      const classification = classifyYtDlpError(error);
+      logTranscriptEvent(
+        'ytdlp.exec.failed',
+        {
+          candidate: candidate.name,
+          type: classification.type,
+          message: error?.message || '',
+          stderr: DEV_VERBOSE_ERRORS ? error?.stderr?.toString() || '' : undefined
+        },
+        'error'
+      );
+
+      if (classification.type !== 'missing_binary') {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || createInternalError('Failed to run yt-dlp.');
 }
 
 async function extractTranscript(videoUrl, videoId) {
@@ -49,7 +154,7 @@ async function extractTranscript(videoUrl, videoId) {
   const ytDlpOptions = {
     writeAutoSubs: true,
     writeSubs: true,
-    subLangs: 'en.*,en',
+    subLangs: 'en.*,en,all,-live_chat',
     subFormat: 'vtt',
     skipDownload: true,
     noPlaylist: true,
@@ -57,33 +162,19 @@ async function extractTranscript(videoUrl, videoId) {
   };
 
   try {
-    let attemptError = null;
-
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        await ytDlp(videoUrl, ytDlpOptions);
-        attemptError = null;
-        break;
-      } catch (error) {
-        attemptError = error;
-        if (attempt === 1) {
-          console.error('yt-dlp subtitle extraction failed on first attempt:', {
-            message: error?.message || '',
-            stderr: error?.stderr || '',
-            stdout: error?.stdout || ''
-          });
-        }
-      }
-    }
-
-    if (attemptError) {
-      throw attemptError;
-    }
+    logTranscriptEvent('subtitles.fetch.start', { videoUrl, videoId, workdir });
+    await runYtDlp(videoUrl, ytDlpOptions);
+    logTranscriptEvent('subtitles.fetch.success', { videoId });
 
     const files = readdirSync(workdir);
     const vttFile = files.find(
       (file) => file.startsWith(`${videoId}.`) && file.endsWith('.vtt')
     );
+    logTranscriptEvent('subtitles.vtt.detected', {
+      videoId,
+      files,
+      vttFile: vttFile || null
+    });
 
     if (!vttFile) {
       throw createNoTranscriptError();
@@ -97,7 +188,12 @@ async function extractTranscript(videoUrl, videoId) {
     let transcript = [];
     try {
       const vttContent = await readFile(vttFilePath, 'utf-8');
+      logTranscriptEvent('subtitles.vtt.parse.start', { videoId, vttFile });
       transcript = parseVttToTranscript(vttContent);
+      logTranscriptEvent('subtitles.vtt.parse.success', {
+        videoId,
+        segments: transcript.length
+      });
     } finally {
       await rm(vttFilePath, { force: true });
     }
@@ -117,11 +213,17 @@ export async function fetchAndStoreTranscript(videoUrl) {
     const metadata = await getVideoMetadata(videoUrl);
     const transcript = await extractTranscript(videoUrl, metadata.id);
 
+    logTranscriptEvent('db.upsert.start', {
+      videoId: metadata.id,
+      title: metadata.title,
+      segments: transcript.length
+    });
     await upsertTranscript({
       videoId: metadata.id,
       title: metadata.title,
       transcript
     });
+    logTranscriptEvent('db.upsert.success', { videoId: metadata.id });
 
     return {
       videoId: metadata.id,
@@ -133,12 +235,44 @@ export async function fetchAndStoreTranscript(videoUrl) {
       throw error;
     }
 
-    if (error?.stderr?.toString()?.toLowerCase()?.includes('subtitles')) {
+    if (error?.code?.startsWith?.('P')) {
+      logTranscriptEvent(
+        'db.upsert.failed',
+        { message: error.message, code: error.code },
+        'error'
+      );
+      throw createInternalError('Failed to save transcript to the database.', {
+        code: error.code,
+        message: error.message
+      });
+    }
+
+    const classification = classifyYtDlpError(error);
+
+    if (classification.type === 'no_subtitles') {
       throw createNoTranscriptError();
     }
 
+    if (classification.type === 'restricted_video') {
+      throw createInternalError(classification.message, {
+        type: classification.type,
+        stderr: error?.stderr?.toString() || ''
+      });
+    }
+
+    if (classification.type === 'missing_binary') {
+      throw createInternalError(classification.message, {
+        type: classification.type,
+        hint: 'Install yt-dlp (https://github.com/yt-dlp/yt-dlp#installation) and ensure it is available on PATH.'
+      });
+    }
+
     if (error?.stderr || error?.message) {
-      throw new Error(mapYtDlpError(error));
+      throw createInternalError(classification.message, {
+        type: classification.type,
+        stderr: error?.stderr?.toString() || '',
+        message: error?.message || ''
+      });
     }
 
     throw error;
