@@ -12,6 +12,9 @@ model Transcript {
   videoId         String   @unique
   title           String
   durationSeconds Int?
+  ingestStatus    String   @default("completed")
+  ingestError     String?
+  lastAttemptedAt DateTime?
   transcriptText  String
   transcriptJson  String
   synopsis        String?
@@ -23,4 +26,6 @@ model Transcript {
   analyzedAt      DateTime?
   analysisVersion String?
   fetchedAt       DateTime @default(now())
+
+  @@index([ingestStatus])
 }

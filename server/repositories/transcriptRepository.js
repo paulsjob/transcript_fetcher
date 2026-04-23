@@ -1,6 +1,17 @@
 import prisma from '../lib/prisma.js';
 
-export async function upsertTranscript({ videoId, title, durationSeconds, transcript, analysis = null }) {
+const DEV_VERBOSE_ERRORS =
+  process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
+
+export async function upsertTranscript({
+  videoId,
+  title,
+  durationSeconds,
+  transcript,
+  analysis = null,
+  ingestStatus = 'completed',
+  ingestError = null
+}) {
   const transcriptText = transcript.map((entry) => entry.text).join(' ').trim();
   const transcriptJson = JSON.stringify(transcript);
 
@@ -9,6 +20,9 @@ export async function upsertTranscript({ videoId, title, durationSeconds, transc
     update: {
       title,
       durationSeconds: Number.isFinite(durationSeconds) ? Math.round(durationSeconds) : null,
+      ingestStatus,
+      ingestError,
+      lastAttemptedAt: new Date(),
       transcriptText,
       transcriptJson,
       synopsis: analysis?.synopsis || null,
@@ -25,6 +39,9 @@ export async function upsertTranscript({ videoId, title, durationSeconds, transc
       videoId,
       title,
       durationSeconds: Number.isFinite(durationSeconds) ? Math.round(durationSeconds) : null,
+      ingestStatus,
+      ingestError,
+      lastAttemptedAt: new Date(),
       transcriptText,
       transcriptJson,
       synopsis: analysis?.synopsis || null,
@@ -51,7 +68,15 @@ function safeParseJsonArray(value) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (error) {
+    if (DEV_VERBOSE_ERRORS) {
+      console.error({
+        scope: 'repository',
+        event: 'json.parse.failed',
+        message: error?.message || 'Unknown JSON parse failure',
+        sample: value.slice(0, 120)
+      });
+    }
     return [];
   }
 }
@@ -66,16 +91,42 @@ function mapTranscriptRecord(record) {
   };
 }
 
+export async function markNoSubtitles({
+  videoId,
+  title = 'Untitled Vimeo Video',
+  durationSeconds = null,
+  message = 'No subtitles available for this video'
+}) {
+  return upsertTranscript({
+    videoId,
+    title,
+    durationSeconds,
+    transcript: [],
+    analysis: null,
+    ingestStatus: 'no_subtitles',
+    ingestError: message
+  });
+}
+
 export async function searchTranscripts(query) {
   return prisma.transcript.findMany({
     where: {
-      OR: [
-        { title: { contains: query } },
-        { transcriptText: { contains: query } },
-        { synopsis: { contains: query } },
-        { tagsJson: { contains: query } },
-        { themesJson: { contains: query } },
-        { keyPointsJson: { contains: query } }
+      AND: [
+        {
+          ingestStatus: {
+            not: 'no_subtitles'
+          }
+        },
+        {
+          OR: [
+            { title: { contains: query } },
+            { transcriptText: { contains: query } },
+            { synopsis: { contains: query } },
+            { tagsJson: { contains: query } },
+            { themesJson: { contains: query } },
+            { keyPointsJson: { contains: query } }
+          ]
+        }
       ]
     },
     select: {
@@ -103,6 +154,9 @@ export async function listTranscripts() {
       videoId: true,
       title: true,
       fetchedAt: true,
+      ingestStatus: true,
+      ingestError: true,
+      lastAttemptedAt: true,
       transcriptText: true,
       durationSeconds: true,
       synopsis: true,
@@ -113,6 +167,11 @@ export async function listTranscripts() {
     },
     orderBy: {
       fetchedAt: 'desc'
+    },
+    where: {
+      ingestStatus: {
+        not: 'no_subtitles'
+      }
     }
   }).then((rows) => rows.map(mapTranscriptRecord));
 }
@@ -125,6 +184,9 @@ export async function getTranscriptById(id) {
       videoId: true,
       title: true,
       fetchedAt: true,
+      ingestStatus: true,
+      ingestError: true,
+      lastAttemptedAt: true,
       durationSeconds: true,
       transcriptJson: true,
       transcriptText: true,
