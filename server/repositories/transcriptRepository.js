@@ -1,7 +1,5 @@
 import prisma from '../lib/prisma.js';
-
-const DEV_VERBOSE_ERRORS =
-  process.env.NODE_ENV !== 'production' || process.env.TRANSCRIPT_DEBUG === '1';
+import { safeJsonStringify, safeParseJsonArray, safeParseJsonObject } from '../utils/json.js';
 
 export async function upsertTranscript({
   videoId,
@@ -13,7 +11,7 @@ export async function upsertTranscript({
   ingestError = null
 }) {
   const transcriptText = transcript.map((entry) => entry.text).join(' ').trim();
-  const transcriptJson = JSON.stringify(transcript);
+  const transcriptJson = safeJsonStringify(transcript, '[]');
 
   return prisma.transcript.upsert({
     where: { videoId },
@@ -26,10 +24,11 @@ export async function upsertTranscript({
       transcriptText,
       transcriptJson,
       synopsis: analysis?.synopsis || null,
-      keyPointsJson: JSON.stringify(analysis?.keyPoints || []),
-      themesJson: JSON.stringify(analysis?.themes || []),
-      tagsJson: JSON.stringify(analysis?.tags || []),
-      notableQuotesJson: JSON.stringify(analysis?.notableQuotes || []),
+      keyPointsJson: safeJsonStringify(analysis?.keyPoints || [], '[]'),
+      entitiesJson: safeJsonStringify(analysis?.entities || {}, '{}'),
+      tagsJson: safeJsonStringify(analysis?.tags || [], '[]'),
+      sectionsJson: safeJsonStringify(analysis?.sections || [], '[]'),
+      notableQuotesJson: safeJsonStringify(analysis?.notableQuotes || [], '[]'),
       analysisStatus: analysis?.analysisStatus || null,
       analyzedAt: analysis?.analyzedAt || null,
       analysisVersion: analysis?.analysisVersion || null,
@@ -45,10 +44,11 @@ export async function upsertTranscript({
       transcriptText,
       transcriptJson,
       synopsis: analysis?.synopsis || null,
-      keyPointsJson: JSON.stringify(analysis?.keyPoints || []),
-      themesJson: JSON.stringify(analysis?.themes || []),
-      tagsJson: JSON.stringify(analysis?.tags || []),
-      notableQuotesJson: JSON.stringify(analysis?.notableQuotes || []),
+      keyPointsJson: safeJsonStringify(analysis?.keyPoints || [], '[]'),
+      entitiesJson: safeJsonStringify(analysis?.entities || {}, '{}'),
+      tagsJson: safeJsonStringify(analysis?.tags || [], '[]'),
+      sectionsJson: safeJsonStringify(analysis?.sections || [], '[]'),
+      notableQuotesJson: safeJsonStringify(analysis?.notableQuotes || [], '[]'),
       analysisStatus: analysis?.analysisStatus || null,
       analyzedAt: analysis?.analyzedAt || null,
       analysisVersion: analysis?.analysisVersion || null
@@ -56,37 +56,19 @@ export async function upsertTranscript({
   });
 }
 
-function safeParseJsonArray(value) {
-  if (Array.isArray(value)) {
-    return value;
-  }
-
-  if (typeof value !== 'string' || !value.trim()) {
-    return [];
-  }
-
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    if (DEV_VERBOSE_ERRORS) {
-      console.error({
-        scope: 'repository',
-        event: 'json.parse.failed',
-        message: error?.message || 'Unknown JSON parse failure',
-        sample: value.slice(0, 120)
-      });
-    }
-    return [];
-  }
-}
-
 function mapTranscriptRecord(record) {
   return {
     ...record,
     keyPoints: safeParseJsonArray(record.keyPointsJson),
-    themes: safeParseJsonArray(record.themesJson),
+    entities: safeParseJsonObject(record.entitiesJson, {
+      people: [],
+      organizations: [],
+      places: [],
+      programs: [],
+      issues: []
+    }),
     tags: safeParseJsonArray(record.tagsJson),
+    sections: safeParseJsonArray(record.sectionsJson),
     notableQuotes: safeParseJsonArray(record.notableQuotesJson)
   };
 }
@@ -123,8 +105,9 @@ export async function searchTranscripts(query) {
             { transcriptText: { contains: query } },
             { synopsis: { contains: query } },
             { tagsJson: { contains: query } },
-            { themesJson: { contains: query } },
-            { keyPointsJson: { contains: query } }
+            { entitiesJson: { contains: query } },
+            { keyPointsJson: { contains: query } },
+            { notableQuotesJson: { contains: query } }
           ]
         }
       ]
@@ -137,8 +120,10 @@ export async function searchTranscripts(query) {
       transcriptJson: true,
       synopsis: true,
       keyPointsJson: true,
-      themesJson: true,
-      tagsJson: true
+      entitiesJson: true,
+      tagsJson: true,
+      sectionsJson: true,
+      notableQuotesJson: true
     },
     orderBy: {
       fetchedAt: 'desc'
@@ -161,8 +146,9 @@ export async function listTranscripts() {
       durationSeconds: true,
       synopsis: true,
       keyPointsJson: true,
-      themesJson: true,
+      entitiesJson: true,
       tagsJson: true,
+      sectionsJson: true,
       analysisStatus: true
     },
     orderBy: {
@@ -192,8 +178,9 @@ export async function getTranscriptById(id) {
       transcriptText: true,
       synopsis: true,
       keyPointsJson: true,
-      themesJson: true,
+      entitiesJson: true,
       tagsJson: true,
+      sectionsJson: true,
       notableQuotesJson: true,
       analysisStatus: true,
       analyzedAt: true,

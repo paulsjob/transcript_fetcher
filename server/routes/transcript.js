@@ -135,7 +135,7 @@ router.get('/search', async (req, res) => {
         title: record.title,
         snippet: metadata.snippet,
         synopsis: record.synopsis || '',
-        themes: record.themes || [],
+        entities: record.entities || {},
         tags: record.tags || [],
         matchQuery: q,
         matchText: metadata.matchText,
@@ -163,7 +163,7 @@ router.get('/transcripts', async (_req, res) => {
       durationSeconds: record.durationSeconds,
       analysisStatus: record.analysisStatus || null,
       synopsis: record.synopsis || '',
-      themes: record.themes || [],
+      entities: record.entities || {},
       tags: record.tags || [],
       keyPoints: record.keyPoints || [],
       preview: buildSnippet(record.transcriptText, '', 70)

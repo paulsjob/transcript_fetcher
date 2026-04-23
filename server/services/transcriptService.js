@@ -247,8 +247,9 @@ export async function fetchAndStoreTranscript(videoUrl) {
         analyzedAt: new Date(),
         synopsis: null,
         keyPoints: [],
-        themes: [],
+        entities: { people: [], organizations: [], places: [], programs: [], issues: [] },
         tags: [],
+        sections: [],
         notableQuotes: []
       };
     }

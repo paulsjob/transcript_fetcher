@@ -8,24 +8,25 @@ datasource db {
 }
 
 model Transcript {
-  id              String   @id @default(uuid())
-  videoId         String   @unique
-  title           String
-  durationSeconds Int?
-  ingestStatus    String   @default("completed")
-  ingestError     String?
-  lastAttemptedAt DateTime?
-  transcriptText  String
-  transcriptJson  String
-  synopsis        String?
-  keyPointsJson   String?
-  themesJson      String?
-  tagsJson        String?
+  id                String   @id @default(uuid())
+  videoId           String   @unique
+  title             String
+  durationSeconds   Int?
+  ingestStatus      String   @default("completed")
+  ingestError       String?
+  lastAttemptedAt   DateTime?
+  transcriptText    String
+  transcriptJson    String
+  synopsis          String?
+  keyPointsJson     String?
+  entitiesJson      String?
+  tagsJson          String?
+  sectionsJson      String?
   notableQuotesJson String?
-  analysisStatus  String?
-  analyzedAt      DateTime?
-  analysisVersion String?
-  fetchedAt       DateTime @default(now())
+  analysisStatus    String?
+  analyzedAt        DateTime?
+  analysisVersion   String?
+  fetchedAt         DateTime @default(now())
 
   @@index([ingestStatus])
 }

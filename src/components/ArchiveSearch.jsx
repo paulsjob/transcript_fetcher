@@ -105,7 +105,7 @@ export default function ArchiveSearch({ onSelectResult }) {
           type="search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search title, transcript, synopsis, tags, themes"
+          placeholder="Search title, transcript, synopsis, tags, entities"
           className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-body text-text outline-none transition focus:border-focus focus:ring-1 focus:ring-focus"
         />
       </div>

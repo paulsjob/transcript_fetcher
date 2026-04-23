@@ -152,6 +152,18 @@ function findInitialMatchIndex(matchLineIndices, searchFocus) {
   return 0;
 }
 
+function renderEntityBlock(label, items = []) {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <p className="text-small text-textMuted">
+      <span className="font-semibold text-text">{label}:</span> {items.join(', ')}
+    </p>
+  );
+}
+
 export default function TranscriptDetailViewer({ transcript, loading, error, onDelete, deleting, searchFocus }) {
   const [activeMatchIndex, setActiveMatchIndex] = useState(-1);
   const matchRefs = useRef({});
@@ -235,7 +247,13 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
       videoId: transcript.videoId,
       fetchedAt: transcript.fetchedAt,
       lineCount: entries.length,
-      transcript: entries
+      transcript: entries,
+      synopsis: transcript.synopsis,
+      keyPoints: transcript.keyPoints,
+      entities: transcript.entities,
+      tags: transcript.tags,
+      sections: transcript.sections,
+      notableQuotes: transcript.notableQuotes
     };
 
     triggerFileDownload(`${baseFileName}.json`, JSON.stringify(payload, null, 2), 'application/json;charset=utf-8');
@@ -254,17 +272,9 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
 
   const renderMatchCounterRef = { current: 0 };
 
-  if (loading) {
-    return <p className="text-small text-textMuted">Loading transcript…</p>;
-  }
-
-  if (error) {
-    return <p className="text-small text-danger">{error}</p>;
-  }
-
-  if (!transcript) {
-    return <p className="text-small text-textMuted">No transcript selected. Pick one from the library.</p>;
-  }
+  if (loading) return <p className="text-small text-textMuted">Loading transcript…</p>;
+  if (error) return <p className="text-small text-danger">{error}</p>;
+  if (!transcript) return <p className="text-small text-textMuted">No transcript selected. Pick one from the library.</p>;
 
   return (
     <article className="space-y-2">
@@ -282,55 +292,40 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
         </div>
 
         <dl className="grid gap-1 text-small text-textMuted sm:grid-cols-2">
-          <div>
-            <dt className="font-semibold text-text">Video ID</dt>
-            <dd className="font-mono">{transcript.videoId}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-text">Fetched</dt>
-            <dd>{formatDate(transcript.fetchedAt)}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-text">Line count</dt>
-            <dd>{entries.length}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-text">Title</dt>
-            <dd>{transcript.title}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-text">Duration</dt>
-            <dd>{transcript.durationSeconds ? `${Math.round(transcript.durationSeconds)} seconds` : 'Unknown'}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold text-text">Analysis status</dt>
-            <dd>{transcript.analysisStatus || 'Not run'}</dd>
-          </div>
+          <div><dt className="font-semibold text-text">Video ID</dt><dd className="font-mono">{transcript.videoId}</dd></div>
+          <div><dt className="font-semibold text-text">Fetched</dt><dd>{formatDate(transcript.fetchedAt)}</dd></div>
+          <div><dt className="font-semibold text-text">Line count</dt><dd>{entries.length}</dd></div>
+          <div><dt className="font-semibold text-text">Duration</dt><dd>{transcript.durationSeconds ? `${Math.round(transcript.durationSeconds)} seconds` : 'Unknown'}</dd></div>
+          <div><dt className="font-semibold text-text">Analysis status</dt><dd>{transcript.analysisStatus || 'Not run'}</dd></div>
+          <div><dt className="font-semibold text-text">Analysis version</dt><dd>{transcript.analysisVersion || 'n/a'}</dd></div>
         </dl>
 
-        {transcript.synopsis ? (
-          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Synopsis</h4>
-            <p className="text-small text-textMuted">{transcript.synopsis}</p>
-          </section>
-        ) : null}
+        {transcript.synopsis ? <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2"><h4 className="text-body font-semibold text-text">Synopsis</h4><p className="text-small text-textMuted">{transcript.synopsis}</p></section> : null}
 
         {transcript.keyPoints?.length ? (
           <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Key takeaways</h4>
+            <h4 className="text-body font-semibold text-text">Key points</h4>
             <ul className="list-disc space-y-1 pl-5 text-small text-textMuted">
-              {transcript.keyPoints.map((point, index) => (
-                <li key={`${point}-${index}`}>{point}</li>
-              ))}
+              {transcript.keyPoints.map((point, index) => <li key={`${point}-${index}`}>{point}</li>)}
             </ul>
           </section>
         ) : null}
 
-        {transcript.themes?.length || transcript.tags?.length ? (
+        {transcript.entities ? (
           <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
-            <h4 className="text-body font-semibold text-text">Discovery metadata</h4>
-            {transcript.themes?.length ? <p className="text-small text-textMuted">Themes: {transcript.themes.join(', ')}</p> : null}
-            {transcript.tags?.length ? <p className="text-small text-textMuted">Tags: {transcript.tags.join(', ')}</p> : null}
+            <h4 className="text-body font-semibold text-text">Entities</h4>
+            {renderEntityBlock('People', transcript.entities.people)}
+            {renderEntityBlock('Organizations', transcript.entities.organizations)}
+            {renderEntityBlock('Places', transcript.entities.places)}
+            {renderEntityBlock('Programs', transcript.entities.programs)}
+            {renderEntityBlock('Issues', transcript.entities.issues)}
+          </section>
+        ) : null}
+
+        {transcript.tags?.length ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Editorial tags</h4>
+            <p className="text-small text-textMuted">{transcript.tags.join(', ')}</p>
           </section>
         ) : null}
 
@@ -340,8 +335,25 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
             <ul className="space-y-1 text-small text-textMuted">
               {transcript.notableQuotes.map((item, index) => (
                 <li key={`${item.quote}-${index}`}>
+                  <span className="font-semibold text-text">{item.kind || 'quote'}:</span>{' '}
                   {item.timestamp ? <span className="font-mono text-text">[{item.timestamp}] </span> : null}
                   {item.quote}
+                  {item.rationale ? <span> — {item.rationale}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
+        {transcript.sections?.length ? (
+          <section className="space-y-1 rounded-md border border-border bg-surfaceSubtle p-2">
+            <h4 className="text-body font-semibold text-text">Sections</h4>
+            <ul className="space-y-1 text-small text-textMuted">
+              {transcript.sections.map((section, index) => (
+                <li key={`${section.label}-${index}`}>
+                  <span className="font-semibold text-text">{section.label}</span>{' '}
+                  {(section.startTimestamp || section.endTimestamp) ? `(${section.startTimestamp || '—'} → ${section.endTimestamp || '—'}) ` : ''}
+                  <span>{section.summary}</span>
                 </li>
               ))}
             </ul>
@@ -350,25 +362,11 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
 
         {query ? (
           <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surfaceSubtle p-2 text-small">
-            <span className="text-textMuted">
-              Matches for <strong className="text-text">“{query}”</strong>: {matchLineIndices.length}
-            </span>
+            <span className="text-textMuted">Matches for <strong className="text-text">“{query}”</strong>: {matchLineIndices.length}</span>
             {matchLineIndices.length ? (
               <>
-                <button
-                  type="button"
-                  onClick={() => moveMatch(-1)}
-                  className="rounded-md border border-border px-2 py-1 text-text transition hover:border-focus"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveMatch(1)}
-                  className="rounded-md border border-border px-2 py-1 text-text transition hover:border-focus"
-                >
-                  Next
-                </button>
+                <button type="button" onClick={() => moveMatch(-1)} className="rounded-md border border-border px-2 py-1 text-text transition hover:border-focus">Previous</button>
+                <button type="button" onClick={() => moveMatch(1)} className="rounded-md border border-border px-2 py-1 text-text transition hover:border-focus">Next</button>
                 <span className="text-textMuted">Active: {activeMatchIndex + 1}</span>
               </>
             ) : (
@@ -378,54 +376,24 @@ export default function TranscriptDetailViewer({ transcript, loading, error, onD
         ) : null}
 
         <div className="flex flex-wrap gap-1">
-          <button
-            type="button"
-            onClick={() => copyToClipboard(transcriptWithTimestamps, 'copy transcript')}
-            className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus"
-          >
-            Copy full transcript
-          </button>
-          <button
-            type="button"
-            onClick={() => copyToClipboard(transcriptTextOnly, 'copy transcript text')}
-            className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus"
-          >
-            Copy transcript text only
-          </button>
-          <button
-            type="button"
-            onClick={() => triggerFileDownload(`${baseFileName}.txt`, transcriptWithTimestamps, 'text/plain;charset=utf-8')}
-            className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus"
-          >
-            Download .txt
-          </button>
-          <button
-            type="button"
-            onClick={handleJsonDownload}
-            className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus"
-          >
-            Download .json
-          </button>
+          <button type="button" onClick={() => copyToClipboard(transcriptWithTimestamps, 'copy transcript')} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Copy full transcript</button>
+          <button type="button" onClick={() => copyToClipboard(transcriptTextOnly, 'copy transcript text')} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Copy transcript text only</button>
+          <button type="button" onClick={() => triggerFileDownload(`${baseFileName}.txt`, transcriptWithTimestamps, 'text/plain;charset=utf-8')} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Download .txt</button>
+          <button type="button" onClick={handleJsonDownload} className="rounded-md border border-border bg-surfaceSubtle px-2 py-1 text-small text-text transition hover:border-focus">Download .json</button>
         </div>
       </header>
 
       <div className="max-h-[65vh] overflow-y-auto rounded-md border border-border bg-surfaceSubtle p-2">
         {entries.length ? (
           <div className="space-y-2">
-            {entries.map((line, index) => {
-              return (
-                <div
-                  key={`${line.timestamp || 'line'}-${index}`}
-                  id={`transcript-line-${index}`}
-                  className="grid grid-cols-[72px_1fr] gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0"
-                >
-                  <span className="font-mono text-small text-textMuted">{line.timestamp || '—'}</span>
-                  <p className="whitespace-pre-wrap break-words text-body text-text">
-                    {buildHighlightedText(line.text || '', query, index, activeMatchIndex, setMatchRef, renderMatchCounterRef)}
-                  </p>
-                </div>
-              );
-            })}
+            {entries.map((line, index) => (
+              <div key={`${line.timestamp || 'line'}-${index}`} id={`transcript-line-${index}`} className="grid grid-cols-[72px_1fr] gap-2 border-b border-border pb-2 last:border-b-0 last:pb-0">
+                <span className="font-mono text-small text-textMuted">{line.timestamp || '—'}</span>
+                <p className="whitespace-pre-wrap break-words text-body text-text">
+                  {buildHighlightedText(line.text || '', query, index, activeMatchIndex, setMatchRef, renderMatchCounterRef)}
+                </p>
+              </div>
+            ))}
           </div>
         ) : (
           <p className="whitespace-pre-wrap break-words text-body text-text">No transcript text available.</p>
