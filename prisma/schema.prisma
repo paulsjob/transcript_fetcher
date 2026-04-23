@@ -8,10 +8,19 @@ datasource db {
 }
 
 model Transcript {
-  id             String   @id @default(uuid())
-  videoId        String   @unique
-  title          String
-  transcriptText String
-  transcriptJson String
-  fetchedAt      DateTime @default(now())
+  id              String   @id @default(uuid())
+  videoId         String   @unique
+  title           String
+  durationSeconds Int?
+  transcriptText  String
+  transcriptJson  String
+  synopsis        String?
+  keyPointsJson   String?
+  themesJson      String?
+  tagsJson        String?
+  notableQuotesJson String?
+  analysisStatus  String?
+  analyzedAt      DateTime?
+  analysisVersion String?
+  fetchedAt       DateTime @default(now())
 }

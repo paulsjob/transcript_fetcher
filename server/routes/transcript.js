@@ -117,6 +117,9 @@ router.get('/search', async (req, res) => {
         videoId: record.videoId,
         title: record.title,
         snippet: metadata.snippet,
+        synopsis: record.synopsis || '',
+        themes: record.themes || [],
+        tags: record.tags || [],
         matchQuery: q,
         matchText: metadata.matchText,
         bestLineIndex: metadata.bestLineIndex,
@@ -139,6 +142,12 @@ router.get('/transcripts', async (_req, res) => {
       videoId: record.videoId,
       title: record.title,
       fetchedAt: record.fetchedAt,
+      durationSeconds: record.durationSeconds,
+      analysisStatus: record.analysisStatus || null,
+      synopsis: record.synopsis || '',
+      themes: record.themes || [],
+      tags: record.tags || [],
+      keyPoints: record.keyPoints || [],
       preview: buildSnippet(record.transcriptText, '', 70)
     }));
 
