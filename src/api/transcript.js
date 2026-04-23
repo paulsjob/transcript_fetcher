@@ -5,14 +5,19 @@ export async function fetchTranscript(url) {
     body: JSON.stringify({ url })
   });
 
-  const payload = await response.json();
+  const rawBody = await response.text();
+  let payload = {};
+
+  try {
+    payload = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    payload = {};
+  }
 
   if (!response.ok) {
-    if (response.status === 404) {
-      throw new Error(payload.error || 'No subtitles available for this video');
-    }
-
-    throw new Error(payload.error || 'Unable to fetch transcript.');
+    const backendMessage =
+      payload.error || payload.message || rawBody || (response.status === 404 ? 'No subtitles available for this video' : '');
+    throw new Error(backendMessage || 'Unable to fetch transcript.');
   }
 
   return payload.transcript ?? [];
