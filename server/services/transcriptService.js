@@ -1,42 +1,52 @@
-import { execFile } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
+import ytDlp from 'yt-dlp-exec';
 import { parseVttToTranscript } from '../utils/parseVtt.js';
+import { upsertTranscript } from '../repositories/transcriptRepository.js';
 
-const execFileAsync = promisify(execFile);
+function mapYtDlpError(error = null) {
+  const stderr = (error?.stderr || error?.message || '').toString().toLowerCase();
 
-function mapYtDlpError(stderr = '') {
-  const lowerStderr = stderr.toLowerCase();
-
-  if (lowerStderr.includes('unsupported url')) {
+  if (stderr.includes('unsupported url')) {
     return 'Unsupported video URL.';
   }
 
-  if (lowerStderr.includes('subtitles') || lowerStderr.includes('no subtitles')) {
+  if (stderr.includes('subtitles') || stderr.includes('no subtitles')) {
     return 'No subtitles were found for this video.';
   }
 
   return 'Failed to fetch transcript with yt-dlp.';
 }
 
-export async function fetchTranscriptFromVimeo(videoUrl) {
+async function getVideoMetadata(videoUrl) {
+  const jsonOutput = await ytDlp(videoUrl, {
+    dumpSingleJson: true,
+    skipDownload: true,
+    noWarnings: true,
+    noCallHome: true
+  });
+
+  const parsed = JSON.parse(jsonOutput);
+  return {
+    id: parsed.id,
+    title: parsed.title || 'Untitled Vimeo Video'
+  };
+}
+
+async function extractTranscript(videoUrl) {
   const workdir = await mkdtemp(path.join(tmpdir(), 'vimeo-transcript-'));
   const outputTemplate = path.join(workdir, 'transcript.%(ext)s');
 
   try {
-    await execFileAsync('yt-dlp', [
-      '--write-auto-subs',
-      '--write-subs',
-      '--sub-format',
-      'vtt',
-      '--skip-download',
-      '--no-playlist',
-      '--output',
-      outputTemplate,
-      videoUrl
-    ]);
+    await ytDlp(videoUrl, {
+      writeAutoSubs: true,
+      writeSubs: true,
+      subFormat: 'vtt',
+      skipDownload: true,
+      noPlaylist: true,
+      output: outputTemplate
+    });
 
     const files = await readdir(workdir);
     const vttFile = files.find((file) => file.endsWith('.vtt'));
@@ -53,13 +63,36 @@ export async function fetchTranscriptFromVimeo(videoUrl) {
     }
 
     return transcript;
-  } catch (error) {
-    if (error.stderr) {
-      throw new Error(mapYtDlpError(error.stderr));
-    }
-
-    throw error;
   } finally {
     await rm(workdir, { recursive: true, force: true });
   }
+}
+
+export async function fetchAndStoreTranscript(videoUrl) {
+  try {
+    const metadata = await getVideoMetadata(videoUrl);
+    const transcript = await extractTranscript(videoUrl);
+
+    await upsertTranscript({
+      videoId: metadata.id,
+      title: metadata.title,
+      transcript
+    });
+
+    return {
+      videoId: metadata.id,
+      title: metadata.title,
+      transcript
+    };
+  } catch (error) {
+    if (error?.stderr || error?.message) {
+      throw new Error(mapYtDlpError(error));
+    }
+
+    throw error;
+  }
+}
+
+export async function fetchAndStoreTranscriptByVideoId(videoId) {
+  return fetchAndStoreTranscript(`https://vimeo.com/${videoId}`);
 }

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { fetchTranscriptFromVimeo } from '../services/transcriptService.js';
+import { fetchAndStoreTranscript } from '../services/transcriptService.js';
 import { isValidVimeoUrl } from '../utils/validate.js';
 
 const router = Router();
@@ -16,8 +16,8 @@ router.post('/fetch-transcript', async (req, res) => {
   }
 
   try {
-    const transcript = await fetchTranscriptFromVimeo(videoUrl.trim());
-    return res.json({ transcript });
+    const result = await fetchAndStoreTranscript(videoUrl.trim());
+    return res.json(result);
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Failed to fetch transcript.' });
   }
