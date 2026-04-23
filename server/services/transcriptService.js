@@ -21,8 +21,9 @@ function mapYtDlpError(error = null) {
 }
 
 function createNoTranscriptError() {
-  const error = new Error('No transcript available for this video.');
+  const error = new Error('No subtitles available for this video');
   error.statusCode = 404;
+  error.payload = { error: 'No subtitles available for this video' };
   return error;
 }
 
