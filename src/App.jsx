@@ -13,18 +13,20 @@ function escapeRegExp(value) {
 
 
 function parseTimestampToSeconds(value) {
-  if (Number.isFinite(value)) return Math.max(0, Math.floor(value));
-  if (typeof value !== 'string' || !value.trim()) return null;
+  if (typeof value === 'number') return value;
+  if (!value) return 0;
 
-  const trimmedValue = value.trim();
-  const numericValue = Number(trimmedValue);
-  if (Number.isFinite(numericValue)) return Math.max(0, Math.floor(numericValue));
+  const parts = String(value).split(':').map(Number);
 
-  const parts = trimmedValue.split(':').map((part) => Number(part));
-  if (parts.some((part) => !Number.isFinite(part))) return null;
-  if (parts.length === 3) return Math.max(0, Math.floor((parts[0] * 3600) + (parts[1] * 60) + parts[2]));
-  if (parts.length === 2) return Math.max(0, Math.floor((parts[0] * 60) + parts[1]));
-  return null;
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+
+  return Number(value) || 0;
 }
 
 function secondsFromSegment(segment = {}) {
@@ -33,21 +35,11 @@ function secondsFromSegment(segment = {}) {
   return parseTimestampToSeconds(segment.start);
 }
 
-function formatSecondsAsTimestamp(totalSeconds = 0) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const seconds = safeSeconds % 60;
-  const paddedMinutes = String(minutes).padStart(2, '0');
-  const paddedSeconds = String(seconds).padStart(2, '0');
-  return hours ? `${hours}:${paddedMinutes}:${paddedSeconds}` : `${paddedMinutes}:${paddedSeconds}`;
-}
-
-function toVimeoTimeFragment(totalSeconds = 0) {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+function formatSecondsAsTimestamp(seconds) {
+  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
   const minutes = Math.floor(safeSeconds / 60);
-  const seconds = safeSeconds % 60;
-  return `${minutes}m${seconds}s`;
+  const secs = safeSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
 function extractVimeoId(url = '') {
@@ -62,13 +54,7 @@ function getVimeoVideoId(video = {}) {
 }
 
 function getVimeoEmbedUrl(videoId) {
-  return videoId ? `https://player.vimeo.com/video/${videoId}` : null;
-}
-
-function buildVimeoTimestampUrl(video, startSeconds) {
-  const videoId = getVimeoVideoId(video);
-  if (!videoId || !Number.isFinite(startSeconds)) return null;
-  return `https://vimeo.com/${videoId}#t=${toVimeoTimeFragment(startSeconds)}`;
+  return `https://player.vimeo.com/video/${videoId}`;
 }
 
 function HighlightedText({ text = '', query = '' }) {
@@ -193,57 +179,30 @@ function VideoList({ videos, selectedId, onSelect, loading }) {
   );
 }
 
-function TranscriptLine({ segment, index, video, query, isMatch, lineRef, onSeek }) {
+function TranscriptLine({ segment, index, query, isMatch, lineRef, onSeek }) {
   const startSeconds = secondsFromSegment(segment);
-  const timestampUrl = buildVimeoTimestampUrl(video, startSeconds);
   const timestampLabel = typeof segment.start === 'string' && segment.start.trim()
     ? segment.start
-    : Number.isFinite(startSeconds)
-      ? formatSecondsAsTimestamp(startSeconds)
-      : 'timestamp';
-  const canSeek = Number.isFinite(startSeconds);
+    : formatSecondsAsTimestamp(startSeconds);
   const seekLabel = `Jump to ${timestampLabel} in video`;
 
-  function handleKeyDown(event) {
-    if (!canSeek) return;
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      onSeek(segment);
-    }
-  }
-
   return (
-    <div
+    <button
       ref={lineRef}
-      role={canSeek ? 'button' : undefined}
-      tabIndex={canSeek ? 0 : undefined}
-      onClick={canSeek ? () => onSeek(segment) : undefined}
-      onKeyDown={handleKeyDown}
-      title={canSeek ? seekLabel : undefined}
-      aria-label={canSeek ? `${seekLabel}: transcript line ${index + 1}` : undefined}
-      className={`grid gap-3 rounded-md p-2 text-sm transition md:grid-cols-[5rem_1fr_auto] ${isMatch ? 'bg-yellow-50' : ''} ${canSeek ? 'cursor-pointer hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300' : ''}`}
+      type="button"
+      onClick={() => onSeek(segment)}
+      title={seekLabel}
+      aria-label={`${seekLabel}: transcript line ${index + 1}`}
+      className={`transcript-row grid w-full gap-3 rounded-md p-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-300 md:grid-cols-[5rem_1fr] ${isMatch ? 'bg-yellow-50' : ''}`}
     >
-      <span className={`font-mono text-xs font-semibold ${canSeek ? 'text-blue-700 underline decoration-blue-300 underline-offset-2' : 'text-slate-400'}`} title={canSeek ? seekLabel : undefined}>
+      <span className="timestamp-link font-mono text-xs font-semibold" title={seekLabel}>
         {timestampLabel}
       </span>
 
-      <span className={`leading-6 ${canSeek ? 'text-slate-800' : 'text-slate-800'}`}>
+      <span className="transcript-text leading-6 text-slate-800">
         <HighlightedText text={segment.text} query={query} />
       </span>
-
-      {timestampUrl ? (
-        <a
-          href={timestampUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="w-fit whitespace-nowrap rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
-          aria-label={`Open Vimeo at ${timestampLabel}`}
-          onClick={(event) => event.stopPropagation()}
-        >
-          Open on Vimeo
-        </a>
-      ) : null}
-    </div>
+    </button>
   );
 }
 
@@ -252,7 +211,7 @@ function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }
   const iframeRef = useRef(null);
   const playerRef = useRef(null);
   const videoId = getVimeoVideoId(video);
-  const embedUrl = getVimeoEmbedUrl(videoId);
+  const embedUrl = videoId ? getVimeoEmbedUrl(videoId) : null;
 
   useEffect(() => {
     if (query.trim() && firstMatchRef.current) {
@@ -270,7 +229,7 @@ function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }
     return () => {
       playerRef.current = null;
       player.destroy().catch((destroyError) => {
-        console.error('Unable to destroy Vimeo player', destroyError);
+        console.warn('Unable to destroy Vimeo player', destroyError);
       });
     };
   }, [embedUrl]);
@@ -283,7 +242,7 @@ function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }
       await playerRef.current.setCurrentTime(seconds);
       await playerRef.current.play();
     } catch (seekError) {
-      console.error('Unable to seek Vimeo player', seekError);
+      console.warn('Unable to seek Vimeo player', seekError);
     }
   }
 
@@ -317,7 +276,7 @@ function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }
       </div>
 
       {embedUrl ? (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-black shadow-sm">
+        <div className="video-player-card overflow-hidden rounded-lg border border-slate-200 bg-black shadow-sm">
           <iframe
             ref={iframeRef}
             key={videoId}
@@ -345,7 +304,6 @@ function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }
                   key={`${segment.start}-${index}`}
                   segment={segment}
                   index={index}
-                  video={video}
                   query={query}
                   isMatch={isMatch}
                   lineRef={ref}
