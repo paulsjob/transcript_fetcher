@@ -9,6 +9,59 @@ function safeParseJson(value, fallback) {
   }
 }
 
+function parseTimestampLabelSeconds(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parts = value.trim().split(':').map((part) => Number.parseInt(part, 10));
+  if (parts.some((part) => !Number.isFinite(part))) return null;
+  if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+  if (parts.length === 2) return (parts[0] * 60) + parts[1];
+  return null;
+}
+
+function secondsFromSegment(segment = {}) {
+  if (Number.isFinite(segment.startSeconds)) return Math.max(0, Math.floor(segment.startSeconds));
+  if (Number.isFinite(segment.start)) return Math.max(0, Math.floor(segment.start));
+  return parseTimestampLabelSeconds(segment.start) ?? 0;
+}
+
+function formatTimestampLabel(totalSeconds = 0) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, '0');
+  const paddedSeconds = String(seconds).padStart(2, '0');
+  return hours > 0 ? `${hours}:${paddedMinutes}:${paddedSeconds}` : `${paddedMinutes}:${paddedSeconds}`;
+}
+
+function toVimeoTimeFragment(totalSeconds = 0) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}m${String(seconds).padStart(2, '0')}s`;
+}
+
+function findMatchIndices(text = '', query = '') {
+  const normalizedText = text.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  const matches = [];
+  let searchFrom = 0;
+
+  while (normalizedQuery && searchFrom <= normalizedText.length) {
+    const index = normalizedText.indexOf(normalizedQuery, searchFrom);
+    if (index === -1) break;
+    matches.push({ start: index, end: index + query.length });
+    searchFrom = index + query.length;
+  }
+
+  return matches;
+}
+
+function sourceDisplayName(video) {
+  if (video.platform === 'vimeo') return 'Vimeo';
+  return video.platform || 'Unknown source';
+}
+
 export function mapVideo(row) {
   if (!row) return null;
   return {
@@ -124,4 +177,52 @@ export async function getVideoById(id) {
 export async function deleteVideoById(id) {
   const result = await prisma.video.deleteMany({ where: { id } });
   return result.count > 0;
+}
+
+export async function searchTranscriptLines({ q = '', limit = 100 } = {}) {
+  const query = q.trim();
+  if (!query) return [];
+  const take = Number.isFinite(limit) ? Math.max(1, Math.min(limit, 500)) : 100;
+
+  const rows = await prisma.video.findMany({
+    where: { transcriptText: { contains: query } },
+    orderBy: [{ modifiedTime: 'desc' }, { fetchedAt: 'desc' }]
+  });
+
+  const matches = [];
+
+  for (const video of rows.map(mapVideo)) {
+    const segments = Array.isArray(video.transcriptJson) ? video.transcriptJson : [];
+
+    for (const segment of segments) {
+      const lineText = typeof segment?.text === 'string' ? segment.text : '';
+      const matchIndices = findMatchIndices(lineText, query);
+      if (!matchIndices.length) continue;
+
+      const startSeconds = secondsFromSegment(segment);
+      const videoId = video.externalId;
+      const vimeoUrlAtTime = videoId ? `https://vimeo.com/${videoId}#t=${toVimeoTimeFragment(startSeconds)}` : null;
+
+      matches.push({
+        id: `${video.id}:${startSeconds}:${matches.length}`,
+        contentItemId: video.id,
+        videoId,
+        title: video.title,
+        sourceDisplayName: sourceDisplayName(video),
+        platform: video.platform,
+        publishedAt: video.createdTime,
+        durationSeconds: video.durationSeconds,
+        lineStartSeconds: startSeconds,
+        lineTimestamp: segment.start ?? formatTimestampLabel(startSeconds),
+        lineTimestampLabel: formatTimestampLabel(startSeconds),
+        lineText,
+        matchIndices,
+        vimeoUrlAtTime
+      });
+
+      if (matches.length >= take) return matches;
+    }
+  }
+
+  return matches;
 }
