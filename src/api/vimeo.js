@@ -37,3 +37,10 @@ export function fetchVideoById(id) {
 export function deleteVideoById(id) {
   return request(`/videos/${id}`, { method: 'DELETE' });
 }
+
+export function searchTranscriptLines(query = '', { limit = 100 } = {}) {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set('q', query.trim());
+  if (limit) params.set('limit', String(limit));
+  return request(`/search${params.toString() ? `?${params.toString()}` : ''}`);
+}

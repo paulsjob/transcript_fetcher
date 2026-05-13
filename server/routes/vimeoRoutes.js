@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { syncVimeoArchive } from '../services/ingestService.js';
-import { deleteVideoById, getVideoById, listVideos } from '../repositories/videoRepository.js';
+import { deleteVideoById, getVideoById, listVideos, searchTranscriptLines } from '../repositories/videoRepository.js';
 import { readBoolean, readOptionalInteger } from '../config/env.js';
 
 const router = Router();
@@ -87,18 +87,25 @@ router.get('/search', async (req, res) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (!q) return res.json([]);
-    const videos = await listVideos({ q });
-    return res.json(videos.map((video) => ({
-      id: video.id,
-      title: video.title,
-      url: video.url,
-      textTrackStatus: video.textTrackStatus,
-      ingestStatus: video.ingestStatus,
-      snippet: buildSnippet(video, q)
-    })));
+    const limit = req.query.limit ? Number.parseInt(req.query.limit, 10) : 100;
+    const matches = await searchTranscriptLines({ q, limit });
+    return res.json(matches);
   } catch (error) {
     logRouteError('/api/search', error);
-    return res.status(500).json({ error: 'Failed to search videos.' });
+    return res.status(500).json({ error: 'Failed to search transcript lines.' });
+  }
+});
+
+router.get('/transcripts/search', async (req, res) => {
+  try {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!q) return res.json([]);
+    const limit = req.query.limit ? Number.parseInt(req.query.limit, 10) : 100;
+    const matches = await searchTranscriptLines({ q, limit });
+    return res.json(matches);
+  } catch (error) {
+    logRouteError('/api/transcripts/search', error);
+    return res.status(500).json({ error: 'Failed to search transcript lines.' });
   }
 });
 
