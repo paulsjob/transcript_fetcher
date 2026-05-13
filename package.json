@@ -10,20 +10,18 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "npm run prisma:sync && node server/index.js",
-    "prisma:generate": "prisma generate",
-    "prisma:db:push": "prisma db push",
-    "prisma:migrate": "prisma migrate dev --name init_transcript_archive",
-    "prisma:sync": "prisma db push && prisma generate",
-    "postinstall": "prisma generate"
+    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma generate",
+    "prisma:db:push": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma db push",
+    "prisma:migrate": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma migrate dev --name vimeo_archive_foundation",
+    "prisma:sync": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma db push && DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma generate",
+    "postinstall": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma generate"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "@prisma/client": "^5.22.0",
-    "node-cron": "^3.0.3",
-    "yt-dlp-exec": "^1.0.2"
+    "@prisma/client": "^5.22.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.2",

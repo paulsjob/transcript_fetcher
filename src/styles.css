@@ -6,15 +6,11 @@
 
 @layer base {
   :root {
-    color: #111827;
-    background-color: #F9FAFB;
-  }
-
-  * {
-    @apply border-border;
+    color: #0f172a;
+    background-color: #f8fafc;
   }
 
   body {
-    @apply m-0 font-body text-body text-text antialiased;
+    @apply m-0 font-body antialiased;
   }
 }
