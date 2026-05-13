@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Player from '@vimeo/player';
+import { useEffect, useState } from 'react';
+import TranscriptDetailViewer from './components/TranscriptDetailViewer';
 import { deleteVideoById, fetchVideoById, fetchVideos, searchTranscriptLines, syncVimeoArchive } from './api/vimeo';
 
 function statusLabel(status) {
@@ -29,33 +29,6 @@ function parseTimestampToSeconds(value) {
   return Number(value) || 0;
 }
 
-function secondsFromSegment(segment = {}) {
-  if (Number.isFinite(segment.startSeconds)) return Math.max(0, Math.floor(segment.startSeconds));
-  if (Number.isFinite(segment.start)) return Math.max(0, Math.floor(segment.start));
-  return parseTimestampToSeconds(segment.start);
-}
-
-function formatSecondsAsTimestamp(seconds) {
-  const safeSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
-  const minutes = Math.floor(safeSeconds / 60);
-  const secs = safeSeconds % 60;
-  return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-}
-
-function extractVimeoId(url = '') {
-  if (typeof url !== 'string' || !url.trim()) return '';
-  const match = url.match(/vimeo\.com\/(?:.*\/)?(\d+)(?:$|[?#/])/i);
-  return match?.[1] || '';
-}
-
-function getVimeoVideoId(video = {}) {
-  if (!video) return '';
-  return video.videoId || video.externalId || extractVimeoId(video.url);
-}
-
-function getVimeoEmbedUrl(videoId) {
-  return `https://player.vimeo.com/video/${videoId}`;
-}
 
 function HighlightedText({ text = '', query = '' }) {
   if (!query.trim()) return <>{text}</>;
@@ -179,146 +152,6 @@ function VideoList({ videos, selectedId, onSelect, loading }) {
   );
 }
 
-function TranscriptLine({ segment, index, query, isMatch, lineRef, onSeek }) {
-  const startSeconds = secondsFromSegment(segment);
-  const timestampLabel = typeof segment.start === 'string' && segment.start.trim()
-    ? segment.start
-    : formatSecondsAsTimestamp(startSeconds);
-  const seekLabel = `Jump to ${timestampLabel} in video`;
-
-  return (
-    <button
-      ref={lineRef}
-      type="button"
-      onClick={() => onSeek(segment)}
-      title={seekLabel}
-      aria-label={`${seekLabel}: transcript line ${index + 1}`}
-      className={`transcript-row grid w-full gap-3 rounded-md p-3 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-blue-300 md:grid-cols-[5rem_1fr] ${isMatch ? 'bg-yellow-50' : ''}`}
-    >
-      <span className="timestamp-link font-mono text-xs font-semibold" title={seekLabel}>
-        {timestampLabel}
-      </span>
-
-      <span className="transcript-text leading-6 text-slate-800">
-        <HighlightedText text={segment.text} query={query} />
-      </span>
-    </button>
-  );
-}
-
-function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }) {
-  const firstMatchRef = useRef(null);
-  const iframeRef = useRef(null);
-  const playerRef = useRef(null);
-  const videoId = getVimeoVideoId(video);
-  const embedUrl = videoId ? getVimeoEmbedUrl(videoId) : null;
-
-  useEffect(() => {
-    if (query.trim() && firstMatchRef.current) {
-      firstMatchRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
-  }, [video?.id, query]);
-
-  useEffect(() => {
-    playerRef.current = null;
-    if (!embedUrl || !iframeRef.current) return undefined;
-
-    const player = new Player(iframeRef.current);
-    playerRef.current = player;
-
-    return () => {
-      playerRef.current = null;
-      player.destroy().catch((destroyError) => {
-        console.warn('Unable to destroy Vimeo player', destroyError);
-      });
-    };
-  }, [embedUrl]);
-
-  async function seekToTranscriptLine(line) {
-    const seconds = secondsFromSegment(line);
-    if (!Number.isFinite(seconds) || !playerRef.current) return;
-
-    try {
-      await playerRef.current.setCurrentTime(seconds);
-      await playerRef.current.play();
-    } catch (seekError) {
-      console.warn('Unable to seek Vimeo player', seekError);
-    }
-  }
-
-  useEffect(() => {
-    if (!seekTarget || seekTarget.contentItemId !== video?.id) return;
-    seekToTranscriptLine({ startSeconds: seekTarget.seconds, start: seekTarget.timestampLabel });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seekTarget, video?.id, embedUrl]);
-
-  const segments = useMemo(() => Array.isArray(video?.transcriptJson) ? video.transcriptJson : [], [video]);
-  const normalizedQuery = query.trim().toLowerCase();
-  let firstMatchAssigned = false;
-
-  if (loading) return <p className="text-sm text-slate-500">Loading transcript…</p>;
-  if (error) return <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>;
-  if (!video) return <p className="text-sm text-slate-500">Select a video to view its transcript.</p>;
-
-  return (
-    <article className="space-y-4">
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-950">{video.title}</h2>
-            {video.url ? <a href={video.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-700 hover:underline">Open on Vimeo</a> : null}
-          </div>
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{statusLabel(video.textTrackStatus)}</span>
-        </div>
-        {video.description ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{video.description}</p> : null}
-        {video.ingestError ? <p className="mt-3 rounded-md bg-red-50 p-2 text-sm text-red-700">{video.ingestError}</p> : null}
-        <button type="button" onClick={() => onDelete(video.id)} className="mt-3 rounded-md border border-red-200 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-50">Delete local record</button>
-      </div>
-
-      {embedUrl ? (
-        <div className="video-player-card overflow-hidden rounded-lg border border-slate-200 bg-black shadow-sm">
-          <iframe
-            ref={iframeRef}
-            key={videoId}
-            src={embedUrl}
-            title={`${video.title} Vimeo player`}
-            className="aspect-video w-full"
-            allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
-            allowFullScreen
-          />
-        </div>
-      ) : null}
-
-      <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-white p-4">
-        <h3 className="mb-3 font-semibold text-slate-950">Transcript</h3>
-        {video.textTrackStatus === 'no_subtitles' ? <p className="text-sm text-slate-500">Vimeo has no captions or subtitles available for this video.</p> : null}
-        {video.textTrackStatus === 'failed' ? <p className="text-sm text-slate-500">Transcript ingest failed. Re-run sync after resolving the error.</p> : null}
-        {segments.length ? (
-          <div className="space-y-3">
-            {segments.map((segment, index) => {
-              const isMatch = normalizedQuery && segment.text.toLowerCase().includes(normalizedQuery);
-              const ref = isMatch && !firstMatchAssigned ? firstMatchRef : null;
-              if (isMatch && !firstMatchAssigned) firstMatchAssigned = true;
-              return (
-                <TranscriptLine
-                  key={`${segment.start}-${index}`}
-                  segment={segment}
-                  index={index}
-                  query={query}
-                  isMatch={isMatch}
-                  lineRef={ref}
-                  onSeek={seekToTranscriptLine}
-                />
-              );
-            })}
-          </div>
-        ) : video.transcriptText ? (
-          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800"><HighlightedText text={video.transcriptText} query={query} /></p>
-        ) : null}
-      </div>
-    </article>
-  );
-}
 
 function App() {
   const [videos, setVideos] = useState([]);
@@ -486,7 +319,7 @@ function App() {
           </aside>
 
           <section>
-            <TranscriptDetail video={selectedVideo} query={query} loading={loadingDetail} error={detailError} onDelete={handleDelete} seekTarget={seekTarget} />
+            <TranscriptDetailViewer video={selectedVideo} query={query} loading={loadingDetail} error={detailError} onDelete={handleDelete} seekTarget={seekTarget} />
           </section>
         </section>
       </div>
