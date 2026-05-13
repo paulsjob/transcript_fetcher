@@ -1,186 +1,237 @@
-import { useEffect, useMemo, useState } from 'react';
-import { fetchTranscript } from './api/transcript';
-import { deleteTranscriptById, fetchTranscriptById, fetchTranscriptLibrary } from './api/transcripts';
-import { fetchSources } from './api/sources';
-import TranscriptDetailViewer from './components/TranscriptDetailViewer';
-import TranscriptLibraryList from './components/TranscriptLibraryList';
-import TranscriptPanel from './components/TranscriptPanel';
-import UrlInputForm from './components/UrlInputForm';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { deleteVideoById, fetchVideoById, fetchVideos, syncVimeoArchive } from './api/vimeo';
 
-const DEFAULT_LIBRARY_OPTIONS = { q: '', sortBy: 'fetchedAt', sortOrder: 'desc', platform: 'any', sourceId: 'any' };
+function statusLabel(status) {
+  if (status === 'no_subtitles') return 'no subtitles';
+  return status || 'pending';
+}
 
-function App() {
-  const [url, setUrl] = useState('');
-  const [transcript, setTranscript] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-  const [sources, setSources] = useState([]);
-  const [activeTab, setActiveTab] = useState('master');
+function HighlightedText({ text = '', query = '' }) {
+  if (!query.trim()) return <>{text}</>;
+  const pattern = new RegExp(`(${escapeRegExp(query.trim())})`, 'ig');
+  const parts = text.split(pattern);
+  const normalizedQuery = query.trim().toLowerCase();
+  return parts.map((part, index) => (
+    part.toLowerCase() === normalizedQuery
+      ? <mark key={`${part}-${index}`} className="rounded bg-yellow-200 px-0.5 text-slate-950">{part}</mark>
+      : <span key={`${part}-${index}`}>{part}</span>
+  ));
+}
 
-  const [library, setLibrary] = useState([]);
-  const [libraryLoading, setLibraryLoading] = useState(true);
-  const [libraryError, setLibraryError] = useState('');
-  const [libraryOptions, setLibraryOptions] = useState(DEFAULT_LIBRARY_OPTIONS);
-
-  const [selectedTranscriptId, setSelectedTranscriptId] = useState('');
-  const [selectedTranscript, setSelectedTranscript] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState('');
-  const [deleteLoading, setDeleteLoading] = useState(false);
-
-  async function loadSources() {
-    try {
-      const data = await fetchSources();
-      setSources(data);
-    } catch {
-      setSources([]);
-    }
-  }
-
-  async function loadLibrary(preferredSelectionId = '', options = libraryOptions) {
-    setLibraryLoading(true);
-    setLibraryError('');
-    try {
-      const data = await fetchTranscriptLibrary(options);
-      setLibrary(data);
-      const selectedId = preferredSelectionId || selectedTranscriptId;
-      if (selectedId && data.some((item) => item.id === selectedId)) {
-        setSelectedTranscriptId(selectedId);
-        return;
-      }
-      setSelectedTranscriptId(data[0]?.id || '');
-    } catch (loadError) {
-      setLibraryError(loadError.message);
-    } finally {
-      setLibraryLoading(false);
-    }
-  }
-
-  useEffect(() => { loadSources(); }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => { loadLibrary('', libraryOptions); }, 250);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libraryOptions]);
-
-  useEffect(() => {
-    if (!selectedTranscriptId) {
-      setSelectedTranscript(null);
-      setDetailError('');
-      return;
-    }
-
-    let cancelled = false;
-    async function loadTranscriptDetail() {
-      setDetailLoading(true);
-      setDetailError('');
-      try {
-        const data = await fetchTranscriptById(selectedTranscriptId);
-        if (!cancelled) setSelectedTranscript(data);
-      } catch (loadError) {
-        if (!cancelled) {
-          setDetailError(loadError.message);
-          setSelectedTranscript(null);
-        }
-      } finally {
-        if (!cancelled) setDetailLoading(false);
-      }
-    }
-    loadTranscriptDetail();
-    return () => { cancelled = true; };
-  }, [selectedTranscriptId]);
-
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setLoading(true);
-    setError('');
-    setTranscript([]);
-    try {
-      const data = await fetchTranscript(url);
-      setTranscript(data);
-      await loadSources();
-      await loadLibrary();
-    } catch (fetchError) {
-      setError(fetchError.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleDeleteTranscript(id) {
-    setDeleteLoading(true);
-    setDetailError('');
-    try {
-      await deleteTranscriptById(id);
-      await loadLibrary();
-      if (selectedTranscriptId === id) {
-        setSelectedTranscriptId('');
-        setSelectedTranscript(null);
-      }
-    } catch (deleteError) {
-      setDetailError(deleteError.message);
-    } finally {
-      setDeleteLoading(false);
-    }
-  }
-
-  const sourceTabs = useMemo(() => [{ id: 'master', label: 'Master Index' }, ...sources.map((source) => ({ id: source.id, label: source.displayName }))], [sources]);
-
-  const librarySubtitle = useMemo(() => (libraryLoading ? 'Loading archive library…' : `${library.length} item${library.length === 1 ? '' : 's'}`), [library.length, libraryLoading]);
+function VideoList({ videos, selectedId, onSelect, loading }) {
+  if (loading) return <p className="text-sm text-slate-500">Loading Vimeo archive…</p>;
+  if (!videos.length) return <p className="text-sm text-slate-500">No Vimeo videos ingested yet. Click Sync Vimeo Archive to start.</p>;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 bg-background px-3 py-4">
-      <header className="space-y-1">
-        <h1 className="text-h1 text-text">Media Archive Master Index</h1>
-        <p className="text-body text-textMuted">Source-aware ingest and searchable archive across platforms.</p>
-      </header>
-
-      <nav className="flex flex-wrap gap-2">
-        {sourceTabs.map((tab) => (
+    <ul className="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      {videos.map((video) => (
+        <li key={video.id}>
           <button
-            key={tab.id}
             type="button"
-            onClick={() => {
-              setActiveTab(tab.id);
-              setLibraryOptions((current) => ({ ...current, sourceId: tab.id === 'master' ? 'any' : tab.id, platform: tab.id === 'master' ? current.platform : 'any' }));
-            }}
-            className={`rounded-md border px-3 py-1 text-sm ${activeTab === tab.id ? 'border-focus bg-surfaceSubtle text-text' : 'border-border text-textMuted'}`}
+            onClick={() => onSelect(video.id)}
+            className={`w-full p-4 text-left transition hover:bg-slate-50 ${selectedId === video.id ? 'bg-blue-50' : 'bg-white'}`}
           >
-            {tab.label}
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="font-semibold text-slate-950">{video.title}</h3>
+              <span className={`shrink-0 rounded-full px-2 py-1 text-xs font-medium ${video.textTrackStatus === 'completed' ? 'bg-green-100 text-green-700' : video.textTrackStatus === 'failed' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700'}`}>
+                {statusLabel(video.textTrackStatus)}
+              </span>
+            </div>
+            {video.preview ? <p className="mt-2 text-sm text-slate-600">{video.preview}</p> : null}
+            <p className="mt-2 text-xs text-slate-400">Fetched {video.fetchedAt ? new Date(video.fetchedAt).toLocaleString() : 'not yet'}</p>
           </button>
-        ))}
-      </nav>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
-      <section className="grid gap-3 lg:grid-cols-[420px_1fr]">
-        <section className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <h2 className="text-h3 text-text">Library</h2>
-          <p className="text-small text-textMuted">{librarySubtitle}</p>
-          <TranscriptLibraryList
-            items={library}
-            selectedId={selectedTranscriptId}
-            loading={libraryLoading}
-            error={libraryError}
-            filters={libraryOptions}
-            sources={sources}
-            onFiltersChange={(next) => setLibraryOptions((current) => ({ ...current, ...next }))}
-            onSelect={(id) => setSelectedTranscriptId(id)}
+function TranscriptDetail({ video, query, loading, error, onDelete }) {
+  const firstMatchRef = useRef(null);
+
+  useEffect(() => {
+    if (query.trim() && firstMatchRef.current) {
+      firstMatchRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [video?.id, query]);
+
+  const segments = useMemo(() => Array.isArray(video?.transcriptJson) ? video.transcriptJson : [], [video]);
+  const normalizedQuery = query.trim().toLowerCase();
+  let firstMatchAssigned = false;
+
+  if (loading) return <p className="text-sm text-slate-500">Loading transcript…</p>;
+  if (error) return <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>;
+  if (!video) return <p className="text-sm text-slate-500">Select a video to view its transcript.</p>;
+
+  return (
+    <article className="space-y-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-950">{video.title}</h2>
+            {video.url ? <a href={video.url} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-700 hover:underline">Open on Vimeo</a> : null}
+          </div>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">{statusLabel(video.textTrackStatus)}</span>
+        </div>
+        {video.description ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{video.description}</p> : null}
+        {video.ingestError ? <p className="mt-3 rounded-md bg-red-50 p-2 text-sm text-red-700">{video.ingestError}</p> : null}
+        <button type="button" onClick={() => onDelete(video.id)} className="mt-3 rounded-md border border-red-200 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-50">Delete local record</button>
+      </div>
+
+      <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-white p-4">
+        <h3 className="mb-3 font-semibold text-slate-950">Transcript</h3>
+        {video.textTrackStatus === 'no_subtitles' ? <p className="text-sm text-slate-500">Vimeo has no captions or subtitles available for this video.</p> : null}
+        {video.textTrackStatus === 'failed' ? <p className="text-sm text-slate-500">Transcript ingest failed. Re-run sync after resolving the error.</p> : null}
+        {segments.length ? (
+          <div className="space-y-3">
+            {segments.map((segment, index) => {
+              const isMatch = normalizedQuery && segment.text.toLowerCase().includes(normalizedQuery);
+              const ref = isMatch && !firstMatchAssigned ? firstMatchRef : null;
+              if (isMatch && !firstMatchAssigned) firstMatchAssigned = true;
+              return (
+                <p key={`${segment.start}-${index}`} ref={ref} className={`grid gap-3 rounded-md p-2 text-sm md:grid-cols-[5rem_1fr] ${isMatch ? 'bg-yellow-50' : ''}`}>
+                  <span className="font-mono text-xs text-slate-400">{segment.start}</span>
+                  <span className="leading-6 text-slate-800"><HighlightedText text={segment.text} query={query} /></span>
+                </p>
+              );
+            })}
+          </div>
+        ) : video.transcriptText ? (
+          <p className="whitespace-pre-wrap text-sm leading-6 text-slate-800"><HighlightedText text={video.transcriptText} query={query} /></p>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function App() {
+  const [videos, setVideos] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [selectedVideo, setSelectedVideo] = useState(null);
+  const [query, setQuery] = useState('');
+  const [loadingVideos, setLoadingVideos] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState('');
+  const [detailError, setDetailError] = useState('');
+  const [syncSummary, setSyncSummary] = useState(null);
+
+  async function loadVideos(preferredId = selectedId) {
+    setLoadingVideos(true);
+    setError('');
+    try {
+      const data = await fetchVideos(query);
+      setVideos(data);
+      if (preferredId && data.some((video) => video.id === preferredId)) {
+        setSelectedId(preferredId);
+      } else {
+        setSelectedId(data[0]?.id || '');
+      }
+    } catch (loadError) {
+      setError(loadError.message);
+    } finally {
+      setLoadingVideos(false);
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(() => { loadVideos(); }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedVideo(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadDetail() {
+      setLoadingDetail(true);
+      setDetailError('');
+      try {
+        const data = await fetchVideoById(selectedId);
+        if (!cancelled) setSelectedVideo(data);
+      } catch (loadError) {
+        if (!cancelled) setDetailError(loadError.message);
+      } finally {
+        if (!cancelled) setLoadingDetail(false);
+      }
+    }
+    loadDetail();
+    return () => { cancelled = true; };
+  }, [selectedId]);
+
+  async function handleSync() {
+    setSyncing(true);
+    setError('');
+    setSyncSummary(null);
+    try {
+      const summary = await syncVimeoArchive();
+      setSyncSummary(summary);
+      await loadVideos(selectedId);
+    } catch (syncError) {
+      setError(syncError.message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    await deleteVideoById(id);
+    setSelectedVideo(null);
+    await loadVideos('');
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-50 p-4 text-slate-900">
+      <div className="mx-auto flex max-w-7xl flex-col gap-4">
+        <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">The Bench Vimeo Transcript Archive</h1>
+            <p className="text-sm text-slate-600">Authenticated Vimeo ingest, local SQLite storage, and searchable transcript browsing.</p>
+          </div>
+          <button type="button" onClick={handleSync} disabled={syncing} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-blue-300">
+            {syncing ? 'Syncing…' : 'Sync Vimeo Archive'}
+          </button>
+        </header>
+
+        {error ? <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
+        {syncSummary ? (
+          <section className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">
+            Sync complete: {syncSummary.discovered} discovered, {syncSummary.alreadyCompleted} skipped, {syncSummary.newlyProcessed} transcripts processed, {syncSummary.noSubtitles} no subtitles, {syncSummary.failed} failed.
+          </section>
+        ) : null}
+
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <label htmlFor="archive-search" className="text-sm font-semibold text-slate-700">Search title, description, and transcript text</label>
+          <input
+            id="archive-search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search the Vimeo archive…"
+            className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none ring-blue-500 focus:ring-2"
           />
         </section>
 
-        <section className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <h2 className="text-h3 text-text">Detail</h2>
-          <TranscriptDetailViewer transcript={selectedTranscript} loading={detailLoading} error={detailError} onDelete={handleDeleteTranscript} deleting={deleteLoading} activeSearchTerm={libraryOptions.q} />
-        </section>
-      </section>
+        <section className="grid gap-4 lg:grid-cols-[420px_1fr]">
+          <aside className="space-y-2">
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">Library</h2>
+              <span className="text-sm text-slate-500">{videos.length} video{videos.length === 1 ? '' : 's'}</span>
+            </div>
+            <VideoList videos={videos} selectedId={selectedId} onSelect={setSelectedId} loading={loadingVideos} />
+          </aside>
 
-      <section className="space-y-2">
-        <h2 className="text-h3 text-text">Fetch a new media transcript</h2>
-        <p className="text-small text-textMuted">Paste a Vimeo or YouTube URL to ingest into its source archive.</p>
-        <UrlInputForm url={url} onUrlChange={setUrl} onSubmit={handleSubmit} loading={loading} />
-        <TranscriptPanel transcript={transcript} loading={loading} error={error} />
-      </section>
+          <section>
+            <TranscriptDetail video={selectedVideo} query={query} loading={loadingDetail} error={detailError} onDelete={handleDelete} />
+          </section>
+        </section>
+      </div>
     </main>
   );
 }
