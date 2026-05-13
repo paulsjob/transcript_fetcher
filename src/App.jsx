@@ -10,6 +10,45 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+
+function parseTimestampLabelSeconds(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parts = value.trim().split(':').map((part) => Number.parseInt(part, 10));
+  if (parts.some((part) => !Number.isFinite(part))) return null;
+  if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
+  if (parts.length === 2) return (parts[0] * 60) + parts[1];
+  return null;
+}
+
+function secondsFromSegment(segment = {}) {
+  if (Number.isFinite(segment.startSeconds)) return Math.max(0, Math.floor(segment.startSeconds));
+  if (Number.isFinite(segment.start)) return Math.max(0, Math.floor(segment.start));
+  return parseTimestampLabelSeconds(segment.start);
+}
+
+function toVimeoTimeFragment(totalSeconds = 0) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}m${seconds}s`;
+}
+
+function extractVimeoId(url = '') {
+  if (typeof url !== 'string' || !url.trim()) return '';
+  const match = url.match(/vimeo\.com\/(?:.*\/)?(\d+)(?:$|[?#/])/i);
+  return match?.[1] || '';
+}
+
+function getVimeoVideoId(video = {}) {
+  return video.videoId || video.externalId || extractVimeoId(video.url);
+}
+
+function buildVimeoTimestampUrl(video, startSeconds) {
+  const videoId = getVimeoVideoId(video);
+  if (!videoId || !Number.isFinite(startSeconds)) return null;
+  return `https://vimeo.com/${videoId}#t=${toVimeoTimeFragment(startSeconds)}`;
+}
+
 function HighlightedText({ text = '', query = '' }) {
   if (!query.trim()) return <>{text}</>;
   const pattern = new RegExp(`(${escapeRegExp(query.trim())})`, 'ig');
@@ -131,6 +170,38 @@ function VideoList({ videos, selectedId, onSelect, loading }) {
   );
 }
 
+function TranscriptLine({ segment, index, video, query, isMatch, lineRef }) {
+  const startSeconds = secondsFromSegment(segment);
+  const timestampUrl = buildVimeoTimestampUrl(video, startSeconds);
+  const timestampLabel = segment.start;
+
+  return (
+    <div ref={lineRef} className={`grid gap-3 rounded-md p-2 text-sm md:grid-cols-[5rem_1fr_auto] ${isMatch ? 'bg-yellow-50' : ''}`}>
+      {timestampUrl ? (
+        <a href={timestampUrl} target="_blank" rel="noreferrer" className="font-mono text-xs font-semibold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900 hover:decoration-blue-500" aria-label={`Open Vimeo at ${timestampLabel}`}>
+          {timestampLabel}
+        </a>
+      ) : (
+        <span className="font-mono text-xs text-slate-400">{timestampLabel}</span>
+      )}
+
+      {timestampUrl ? (
+        <a href={timestampUrl} target="_blank" rel="noreferrer" className="leading-6 text-slate-800 hover:text-blue-800" aria-label={`Open transcript line ${index + 1} on Vimeo at ${timestampLabel}`}>
+          <HighlightedText text={segment.text} query={query} />
+        </a>
+      ) : (
+        <span className="leading-6 text-slate-800"><HighlightedText text={segment.text} query={query} /></span>
+      )}
+
+      {timestampUrl ? (
+        <a href={timestampUrl} target="_blank" rel="noreferrer" className="w-fit whitespace-nowrap rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50" aria-label={`Open Vimeo at ${timestampLabel}`}>
+          Open at time
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
 function TranscriptDetail({ video, query, loading, error, onDelete }) {
   const firstMatchRef = useRef(null);
 
@@ -174,10 +245,15 @@ function TranscriptDetail({ video, query, loading, error, onDelete }) {
               const ref = isMatch && !firstMatchAssigned ? firstMatchRef : null;
               if (isMatch && !firstMatchAssigned) firstMatchAssigned = true;
               return (
-                <p key={`${segment.start}-${index}`} ref={ref} className={`grid gap-3 rounded-md p-2 text-sm md:grid-cols-[5rem_1fr] ${isMatch ? 'bg-yellow-50' : ''}`}>
-                  <span className="font-mono text-xs text-slate-400">{segment.start}</span>
-                  <span className="leading-6 text-slate-800"><HighlightedText text={segment.text} query={query} /></span>
-                </p>
+                <TranscriptLine
+                  key={`${segment.start}-${index}`}
+                  segment={segment}
+                  index={index}
+                  video={video}
+                  query={query}
+                  isMatch={isMatch}
+                  lineRef={ref}
+                />
               );
             })}
           </div>
