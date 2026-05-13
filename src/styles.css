@@ -14,3 +14,36 @@
     @apply m-0 font-body antialiased;
   }
 }
+
+@layer components {
+  .video-player-card iframe {
+    display: block;
+    border: 0;
+  }
+
+  .transcript-row {
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .transcript-row:hover {
+    background-color: rgb(239 246 255 / 0.85);
+  }
+
+  .transcript-row:focus-visible {
+    background-color: rgb(239 246 255 / 0.85);
+  }
+
+  .timestamp-link {
+    color: #1d4ed8;
+    text-decoration-line: underline;
+    text-decoration-color: #fdba74;
+    text-underline-offset: 3px;
+  }
+
+  .transcript-row:hover .timestamp-link,
+  .transcript-row:focus-visible .timestamp-link {
+    color: #c2410c;
+  }
+}
