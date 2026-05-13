@@ -17,11 +17,12 @@
     "postinstall": "DATABASE_URL=${DATABASE_URL:-file:./dev.db} prisma generate"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@vimeo/player": "^2.29.5",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@prisma/client": "^5.22.0"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.2",

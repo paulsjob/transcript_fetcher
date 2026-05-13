@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Player from '@vimeo/player';
 import { deleteVideoById, fetchVideoById, fetchVideos, searchTranscriptLines, syncVimeoArchive } from './api/vimeo';
 
 function statusLabel(status) {
@@ -11,19 +12,35 @@ function escapeRegExp(value) {
 }
 
 
-function parseTimestampLabelSeconds(value) {
+function parseTimestampToSeconds(value) {
+  if (Number.isFinite(value)) return Math.max(0, Math.floor(value));
   if (typeof value !== 'string' || !value.trim()) return null;
-  const parts = value.trim().split(':').map((part) => Number.parseInt(part, 10));
+
+  const trimmedValue = value.trim();
+  const numericValue = Number(trimmedValue);
+  if (Number.isFinite(numericValue)) return Math.max(0, Math.floor(numericValue));
+
+  const parts = trimmedValue.split(':').map((part) => Number(part));
   if (parts.some((part) => !Number.isFinite(part))) return null;
-  if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
-  if (parts.length === 2) return (parts[0] * 60) + parts[1];
+  if (parts.length === 3) return Math.max(0, Math.floor((parts[0] * 3600) + (parts[1] * 60) + parts[2]));
+  if (parts.length === 2) return Math.max(0, Math.floor((parts[0] * 60) + parts[1]));
   return null;
 }
 
 function secondsFromSegment(segment = {}) {
   if (Number.isFinite(segment.startSeconds)) return Math.max(0, Math.floor(segment.startSeconds));
   if (Number.isFinite(segment.start)) return Math.max(0, Math.floor(segment.start));
-  return parseTimestampLabelSeconds(segment.start);
+  return parseTimestampToSeconds(segment.start);
+}
+
+function formatSecondsAsTimestamp(totalSeconds = 0) {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const seconds = safeSeconds % 60;
+  const paddedMinutes = String(minutes).padStart(2, '0');
+  const paddedSeconds = String(seconds).padStart(2, '0');
+  return hours ? `${hours}:${paddedMinutes}:${paddedSeconds}` : `${paddedMinutes}:${paddedSeconds}`;
 }
 
 function toVimeoTimeFragment(totalSeconds = 0) {
@@ -40,7 +57,12 @@ function extractVimeoId(url = '') {
 }
 
 function getVimeoVideoId(video = {}) {
+  if (!video) return '';
   return video.videoId || video.externalId || extractVimeoId(video.url);
+}
+
+function getVimeoEmbedUrl(videoId) {
+  return videoId ? `https://player.vimeo.com/video/${videoId}` : null;
 }
 
 function buildVimeoTimestampUrl(video, startSeconds) {
@@ -80,7 +102,7 @@ function HighlightedMatch({ text = '', matchIndices = [] }) {
   return pieces;
 }
 
-function TranscriptSearchResults({ query, results, loading, error }) {
+function TranscriptSearchResults({ query, results, loading, error, onSelectResult }) {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return null;
 
@@ -89,7 +111,7 @@ function TranscriptSearchResults({ query, results, loading, error }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="font-semibold text-slate-950">Timestamp search results</h2>
-          <p className="text-sm text-slate-500">Line-level matches for “{trimmedQuery}” open directly at the transcript timestamp.</p>
+          <p className="text-sm text-slate-500">Line-level matches for “{trimmedQuery}” can open the matching video and jump the embedded player to that timestamp.</p>
         </div>
         <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">{results.length} match{results.length === 1 ? '' : 'es'}</span>
       </div>
@@ -100,42 +122,43 @@ function TranscriptSearchResults({ query, results, loading, error }) {
 
       {results.length ? (
         <div className="mt-4 grid gap-3">
-          {results.map((result) => (
-            <article key={result.id} className="rounded-lg border border-slate-200 p-3 transition hover:border-orange-200 hover:bg-orange-50/30">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-semibold text-slate-950">{result.title}</h3>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">{result.sourceDisplayName || 'Vimeo'}</span>
-                    {result.publishedAt ? <span>Published {new Date(result.publishedAt).toLocaleDateString()}</span> : null}
+          {results.map((result) => {
+            const startSeconds = parseTimestampToSeconds(result.lineStartSeconds ?? result.lineTimestamp ?? result.lineTimestampLabel);
+            const timestampLabel = result.lineTimestampLabel || (Number.isFinite(startSeconds) ? formatSecondsAsTimestamp(startSeconds) : 'timestamp');
+            return (
+              <article key={result.id} className="rounded-lg border border-slate-200 p-3 transition hover:border-orange-200 hover:bg-orange-50/30">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold text-slate-950">{result.title}</h3>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">{result.sourceDisplayName || 'Vimeo'}</span>
+                      {result.publishedAt ? <span>Published {new Date(result.publishedAt).toLocaleDateString()}</span> : null}
+                    </div>
                   </div>
+                  {result.vimeoUrlAtTime ? (
+                    <a href={result.vimeoUrlAtTime} target="_blank" rel="noreferrer" className="rounded-md border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-sm hover:bg-blue-50">
+                      Open on Vimeo
+                    </a>
+                  ) : null}
                 </div>
-                {result.vimeoUrlAtTime ? (
-                  <a href={result.vimeoUrlAtTime} target="_blank" rel="noreferrer" className="rounded-md bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-800">
-                    Open at time
-                  </a>
-                ) : null}
-              </div>
 
-              <div className="mt-3 grid gap-3 md:grid-cols-[5rem_1fr]">
-                {result.vimeoUrlAtTime ? (
-                  <a href={result.vimeoUrlAtTime} target="_blank" rel="noreferrer" className="inline-flex w-fit items-center rounded-full bg-orange-100 px-2.5 py-1 font-mono text-xs font-semibold text-orange-900 hover:bg-orange-200">
-                    {result.lineTimestampLabel}
-                  </a>
-                ) : (
-                  <span className="inline-flex w-fit items-center rounded-full bg-orange-100 px-2.5 py-1 font-mono text-xs font-semibold text-orange-900">{result.lineTimestampLabel}</span>
-                )}
-
-                {result.vimeoUrlAtTime ? (
-                  <a href={result.vimeoUrlAtTime} target="_blank" rel="noreferrer" className="text-sm leading-6 text-slate-800 hover:text-blue-800">
+                <button
+                  type="button"
+                  onClick={() => onSelectResult(result)}
+                  className="mt-3 grid w-full cursor-pointer gap-3 rounded-md p-2 text-left transition hover:bg-orange-100/60 focus:outline-none focus:ring-2 focus:ring-orange-300 md:grid-cols-[5rem_1fr]"
+                  title={`Jump to ${timestampLabel} in video`}
+                  aria-label={`Jump to ${timestampLabel} in ${result.title}`}
+                >
+                  <span className="inline-flex w-fit items-center rounded-full bg-orange-100 px-2.5 py-1 font-mono text-xs font-semibold text-orange-900 hover:bg-orange-200">
+                    {timestampLabel}
+                  </span>
+                  <span className="text-sm leading-6 text-slate-800">
                     <HighlightedMatch text={result.lineText} matchIndices={result.matchIndices || []} />
-                  </a>
-                ) : (
-                  <p className="text-sm leading-6 text-slate-800"><HighlightedMatch text={result.lineText} matchIndices={result.matchIndices || []} /></p>
-                )}
-              </div>
-            </article>
-          ))}
+                  </span>
+                </button>
+              </article>
+            );
+          })}
         </div>
       ) : null}
     </section>
@@ -170,46 +193,105 @@ function VideoList({ videos, selectedId, onSelect, loading }) {
   );
 }
 
-function TranscriptLine({ segment, index, video, query, isMatch, lineRef }) {
+function TranscriptLine({ segment, index, video, query, isMatch, lineRef, onSeek }) {
   const startSeconds = secondsFromSegment(segment);
   const timestampUrl = buildVimeoTimestampUrl(video, startSeconds);
-  const timestampLabel = segment.start;
+  const timestampLabel = typeof segment.start === 'string' && segment.start.trim()
+    ? segment.start
+    : Number.isFinite(startSeconds)
+      ? formatSecondsAsTimestamp(startSeconds)
+      : 'timestamp';
+  const canSeek = Number.isFinite(startSeconds);
+  const seekLabel = `Jump to ${timestampLabel} in video`;
+
+  function handleKeyDown(event) {
+    if (!canSeek) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onSeek(segment);
+    }
+  }
 
   return (
-    <div ref={lineRef} className={`grid gap-3 rounded-md p-2 text-sm md:grid-cols-[5rem_1fr_auto] ${isMatch ? 'bg-yellow-50' : ''}`}>
-      {timestampUrl ? (
-        <a href={timestampUrl} target="_blank" rel="noreferrer" className="font-mono text-xs font-semibold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-900 hover:decoration-blue-500" aria-label={`Open Vimeo at ${timestampLabel}`}>
-          {timestampLabel}
-        </a>
-      ) : (
-        <span className="font-mono text-xs text-slate-400">{timestampLabel}</span>
-      )}
+    <div
+      ref={lineRef}
+      role={canSeek ? 'button' : undefined}
+      tabIndex={canSeek ? 0 : undefined}
+      onClick={canSeek ? () => onSeek(segment) : undefined}
+      onKeyDown={handleKeyDown}
+      title={canSeek ? seekLabel : undefined}
+      aria-label={canSeek ? `${seekLabel}: transcript line ${index + 1}` : undefined}
+      className={`grid gap-3 rounded-md p-2 text-sm transition md:grid-cols-[5rem_1fr_auto] ${isMatch ? 'bg-yellow-50' : ''} ${canSeek ? 'cursor-pointer hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-300' : ''}`}
+    >
+      <span className={`font-mono text-xs font-semibold ${canSeek ? 'text-blue-700 underline decoration-blue-300 underline-offset-2' : 'text-slate-400'}`} title={canSeek ? seekLabel : undefined}>
+        {timestampLabel}
+      </span>
+
+      <span className={`leading-6 ${canSeek ? 'text-slate-800' : 'text-slate-800'}`}>
+        <HighlightedText text={segment.text} query={query} />
+      </span>
 
       {timestampUrl ? (
-        <a href={timestampUrl} target="_blank" rel="noreferrer" className="leading-6 text-slate-800 hover:text-blue-800" aria-label={`Open transcript line ${index + 1} on Vimeo at ${timestampLabel}`}>
-          <HighlightedText text={segment.text} query={query} />
-        </a>
-      ) : (
-        <span className="leading-6 text-slate-800"><HighlightedText text={segment.text} query={query} /></span>
-      )}
-
-      {timestampUrl ? (
-        <a href={timestampUrl} target="_blank" rel="noreferrer" className="w-fit whitespace-nowrap rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50" aria-label={`Open Vimeo at ${timestampLabel}`}>
-          Open at time
+        <a
+          href={timestampUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="w-fit whitespace-nowrap rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+          aria-label={`Open Vimeo at ${timestampLabel}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          Open on Vimeo
         </a>
       ) : null}
     </div>
   );
 }
 
-function TranscriptDetail({ video, query, loading, error, onDelete }) {
+function TranscriptDetail({ video, query, loading, error, onDelete, seekTarget }) {
   const firstMatchRef = useRef(null);
+  const iframeRef = useRef(null);
+  const playerRef = useRef(null);
+  const videoId = getVimeoVideoId(video);
+  const embedUrl = getVimeoEmbedUrl(videoId);
 
   useEffect(() => {
     if (query.trim() && firstMatchRef.current) {
       firstMatchRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   }, [video?.id, query]);
+
+  useEffect(() => {
+    playerRef.current = null;
+    if (!embedUrl || !iframeRef.current) return undefined;
+
+    const player = new Player(iframeRef.current);
+    playerRef.current = player;
+
+    return () => {
+      playerRef.current = null;
+      player.destroy().catch((destroyError) => {
+        console.error('Unable to destroy Vimeo player', destroyError);
+      });
+    };
+  }, [embedUrl]);
+
+  async function seekToTranscriptLine(line) {
+    const seconds = secondsFromSegment(line);
+    if (!Number.isFinite(seconds) || !playerRef.current) return;
+
+    try {
+      await playerRef.current.setCurrentTime(seconds);
+      await playerRef.current.play();
+    } catch (seekError) {
+      console.error('Unable to seek Vimeo player', seekError);
+    }
+  }
+
+  useEffect(() => {
+    if (!seekTarget || seekTarget.contentItemId !== video?.id) return;
+    seekToTranscriptLine({ startSeconds: seekTarget.seconds, start: seekTarget.timestampLabel });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekTarget, video?.id, embedUrl]);
 
   const segments = useMemo(() => Array.isArray(video?.transcriptJson) ? video.transcriptJson : [], [video]);
   const normalizedQuery = query.trim().toLowerCase();
@@ -234,6 +316,20 @@ function TranscriptDetail({ video, query, loading, error, onDelete }) {
         <button type="button" onClick={() => onDelete(video.id)} className="mt-3 rounded-md border border-red-200 px-3 py-1 text-sm font-medium text-red-700 hover:bg-red-50">Delete local record</button>
       </div>
 
+      {embedUrl ? (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-black shadow-sm">
+          <iframe
+            ref={iframeRef}
+            key={videoId}
+            src={embedUrl}
+            title={`${video.title} Vimeo player`}
+            className="aspect-video w-full"
+            allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+            allowFullScreen
+          />
+        </div>
+      ) : null}
+
       <div className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 bg-white p-4">
         <h3 className="mb-3 font-semibold text-slate-950">Transcript</h3>
         {video.textTrackStatus === 'no_subtitles' ? <p className="text-sm text-slate-500">Vimeo has no captions or subtitles available for this video.</p> : null}
@@ -253,6 +349,7 @@ function TranscriptDetail({ video, query, loading, error, onDelete }) {
                   query={query}
                   isMatch={isMatch}
                   lineRef={ref}
+                  onSeek={seekToTranscriptLine}
                 />
               );
             })}
@@ -279,6 +376,7 @@ function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [searchError, setSearchError] = useState('');
+  const [seekTarget, setSeekTarget] = useState(null);
 
   async function loadVideos(preferredId = selectedId) {
     setLoadingVideos(true);
@@ -370,6 +468,17 @@ function App() {
     }
   }
 
+  function handleSearchResultSelect(result) {
+    const seconds = parseTimestampToSeconds(result.lineStartSeconds ?? result.lineTimestamp ?? result.lineTimestampLabel);
+    setSelectedId(result.contentItemId);
+    setSeekTarget({
+      contentItemId: result.contentItemId,
+      seconds: Number.isFinite(seconds) ? seconds : 0,
+      timestampLabel: result.lineTimestampLabel,
+      requestedAt: Date.now()
+    });
+  }
+
   async function handleDelete(id) {
     await deleteVideoById(id);
     setSelectedVideo(null);
@@ -407,7 +516,7 @@ function App() {
           />
         </section>
 
-        <TranscriptSearchResults query={query} results={searchResults} loading={loadingSearch} error={searchError} />
+        <TranscriptSearchResults query={query} results={searchResults} loading={loadingSearch} error={searchError} onSelectResult={handleSearchResultSelect} />
 
         <section className="grid gap-4 lg:grid-cols-[420px_1fr]">
           <aside className="space-y-2">
@@ -419,7 +528,7 @@ function App() {
           </aside>
 
           <section>
-            <TranscriptDetail video={selectedVideo} query={query} loading={loadingDetail} error={detailError} onDelete={handleDelete} />
+            <TranscriptDetail video={selectedVideo} query={query} loading={loadingDetail} error={detailError} onDelete={handleDelete} seekTarget={seekTarget} />
           </section>
         </section>
       </div>
